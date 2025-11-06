@@ -38,8 +38,8 @@ metadata:
   namespace: ecol
 type: Opaque
 stringData:
-  MSSQL_PASSWORD: "3.Collect"
-  EMAIL_PASS: "$!M@j0rGam3r@2024.."
+  MSSQL_PASSWORD: "3.Cxxxxxxxxxxxxx"
+  EMAIL_PASS: "$!M@jxxxxxxxxxxxxxxxxxxx"
 ---
 apiVersion: apps/v1
 kind: Deployment

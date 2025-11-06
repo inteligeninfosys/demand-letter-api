@@ -40,3 +40,5 @@ EXPOSE 8004
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 CMD ["node", "server.js"]
+
+# docker build -t docker.io/inteligeninfosys/demand-api:1.0 .
