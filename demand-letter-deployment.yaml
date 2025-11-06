@@ -1,0 +1,120 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecol-config
+  namespace: ecol
+data:
+  NODE_ENV: "production"
+  TZ: "Africa/Nairobi"
+  SOFFICE_PATH: "/usr/bin/soffice"
+  # Match the Dockerfile; LO writes here (mounted as emptyDir below)
+  LO_USER_INSTALLATION: "file:///tmp/lo_profile"
+  # App-level defaults (override as needed)
+  EMAIL_HOST: "smtp.office365.com"
+  EMAIL_PORT: "25"
+  EMAIL_SECURE: "false"
+  EMAIL_USER: no-reply@stima-sacco.com
+  EMAIL_FROM: "E-Collect <no-reply@stima-sacco.com>"
+  MSSQL_SERVER: '10.100.121.103'
+  MSSQL_PORT: '1435'
+  MSSQL_DATABASE: 'ecol'
+  MSSQL_USER: "sa"
+  MSSQL_ENCRYPT: 'false'
+  MSSQL_TRUST_SERVER_CERTIFICATE: 'true'
+  OUR_REF_PREFIX: "STIMA/REC"
+  S3_ENDPOINT: "http://minio-svc.ecol.svc.cluster.local:9000"
+  S3_BUCKET: "ecol-demand-letters"
+  S3_ACCESS_KEY: minioadmin
+  S3_SECRET_KEY: minioadmin123
+  S3_FORCE_PATH_STYLE: 'true'
+  S3_SIGN_URL_EXP_SECONDS: '3600'
+  S3_REGION: us-east-1
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ecol-secret
+  namespace: ecol
+type: Opaque
+stringData:
+  MSSQL_PASSWORD: "3.Collect"
+  EMAIL_PASS: "$!M@j0rGam3r@2024.."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demand-api
+  namespace: ecol
+  labels:
+    app: demand-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demand-api
+  template:
+    metadata:
+      labels:
+        app: demand-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: demand-api
+          image: docker.io/inteligeninfosys/demand-api:1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8004
+              name: http
+          envFrom:
+            - configMapRef:
+                name: ecol-config
+            - secretRef:
+                name: ecol-secret
+          volumeMounts:
+            - name: lo-profile
+              mountPath: /tmp/lo_profile
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      volumes:
+        - name: lo-profile
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demand-api-svc
+  namespace: ecol
+  labels:
+    app: demand-api-svc
+spec:
+  type: ClusterIP
+  selector:
+    app: demand-api-svc
+  ports:
+    - name: http
+      port: 8004
+      targetPort: http

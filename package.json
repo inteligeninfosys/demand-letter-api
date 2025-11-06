@@ -1,0 +1,27 @@
+{
+  "name": "demand-letter-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.922.0",
+    "@aws-sdk/s3-request-presigner": "^3.922.0",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.19",
+    "docxtemplater": "^3.67.3",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "fs-extra": "^11.3.2",
+    "mssql": "^12.1.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^7.0.10",
+    "pizzip": "^3.2.0"
+  }
+}
