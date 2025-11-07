@@ -78,20 +78,6 @@ spec:
           volumeMounts:
             - name: lo-profile
               mountPath: /tmp/lo_profile
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
-            failureThreshold: 6
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: http
-            initialDelaySeconds: 30
-            periodSeconds: 20
-            failureThreshold: 3
           resources:
             requests:
               cpu: "200m"
@@ -118,3 +104,25 @@ spec:
     - name: http
       port: 8004
       targetPort: http
+---
+kind: Ingress
+metadata:
+  name: demand-letter-ingress
+  namespace: ecol
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: demands.stima-sacco.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: demand-api-svc
+            port:
+              number: 8004
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - demands.stima-sacco.com
+    secretName: stima-tls

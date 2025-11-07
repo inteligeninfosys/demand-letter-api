@@ -21,11 +21,14 @@ import sql from "mssql";
 dayjs.extend(utc);
 const require = createRequire(import.meta.url);
 
+
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "4mb" }));
@@ -37,7 +40,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const execFileAsync = promisify(execFile);
 const safeCode = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9_\-]/g, "");
-const exists = async (p) => !!(await fs.stat(p).catch(() => null));
+async function exists(p) { try { await fs.access(p); return true; } catch { return false; } }
 
 async function listTemplates() {
     if (!(await exists(TEMPLATES_DIR))) return [];
@@ -65,7 +68,7 @@ async function readMeta(code) {
     return JSON.parse(await fs.readFile(p, "utf8"));
 }
 
-async function resolveTemplatePath(code, version) {
+async function resolveTemplatePathxx(code, version) {
     const dir = path.join(TEMPLATES_DIR, safeCode(code));
     const file = version ? `${version}.docx` : "current.docx";
     const p = path.join(dir, file);
@@ -73,6 +76,56 @@ async function resolveTemplatePath(code, version) {
         throw new Error(`Template not found: ${code}/${file}`);
     }
     return p;
+}
+
+// Robust resolver
+async function resolveTemplatePath(template_code, template_version = null) {
+    if (!template_code) throw new Error("template_code is required");
+
+    // 1) sanitize inputs (trim spaces, normalize)
+    const code = String(template_code).trim();                // e.g. 'DL1'
+    const verIn = (template_version ?? "current").toString().trim();
+
+    // If caller passed a full filename like "current.docx" or "DL1_v2.docx", use it as-is
+    const isFileName = /\.(docx)$/i.test(verIn);
+    const fileName = isFileName ? verIn : `${verIn}.docx`;    // "current" -> "current.docx"
+
+    // 2) candidate roots (absolute!)
+    const roots = [
+        process.env.TEMPLATE_DIR,                          // prefer explicit env
+        path.join(__dirname, "templates"),                // ./templates next to server.js
+        "/app/templates",                                 // default in your image
+        "/data/templates",                                // optional external mount
+    ].filter(Boolean);
+
+    // 3) build candidates
+    const tried = [];
+    for (const root of roots) {
+        tried.push(
+            path.join(root, code, fileName),                // /app/templates/DL1/current.docx
+            path.join(root, `${code}.docx`)                 // /app/templates/DL1.docx (fallback)
+        );
+    }
+
+    // 4) return first existing
+    for (const p of tried) {
+        if (await exists(p)) return p;
+    }
+
+    // 5) diagnostics
+    const root = roots[0];
+    let listing = "(missing)";
+    try {
+        const dirs = await fs.readdir(root, { withFileTypes: true });
+        listing = dirs.map(d => (d.isDirectory() ? `${d.name}/` : d.name)).join(", ");
+    } catch { /* ignore */ }
+
+    const msg =
+        `Template not found for code='${code}', version='${verIn}'.\n` +
+        `CWD=${process.cwd()}, __dirname=${__dirname}, TEMPLATE_DIR=${process.env.TEMPLATE_DIR || "(unset)"}\n` +
+        `Tried:\n${tried.map(t => ` - ${t}`).join("\n")}\n` +
+        `Listing of first root (${root}): ${listing}`;
+    throw new Error(msg);
 }
 
 async function renderDocxFromTemplate(templatePath, data) {
@@ -812,7 +865,7 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 
 // GET /letters/download/:id
 // Look up history row by id, issue a presigned GET and redirect (302)
-app.get("/letters/download/:id", async (req, res) => {
+app.get("/demand-letters-api/letters/download/:id", async (req, res) => {
     const pool = await getSqlPool();
     const r = await pool.request()
         .input("id", sql.BigInt, Number(req.params.id))
@@ -825,6 +878,54 @@ app.get("/letters/download/:id", async (req, res) => {
     res.redirect(302, url);
 });
 
+// GET /demand-letters-api/letters/history?account=ACC123&page=0&pageSize=10
+app.get("/demand-letters-api/letters/history", async (req, res) => {
+    try {
+        const account = (req.query.account || "").trim();
+        if (!account) {
+            return res.status(400).json({ error: "Missing ?account parameter" });
+        }
+
+        const page = Number(req.query.page || 0);
+        const pageSize = Number(req.query.pageSize || 20);
+
+        const pool = await getSqlPool();
+
+        const q = `
+      SELECT
+        id,
+        account_number,
+        customer_number,
+        demand_type,
+        date_sent,
+        days_in_arrears,
+        outstanding_balance,
+        sent_by,
+        document_name,
+        bucket,
+        object_key,
+        our_ref,
+        provider_ref,
+        status
+      FROM dbo.demand_letter_history
+      WHERE account_number = @account
+      ORDER BY date_sent DESC
+      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+    `;
+
+        const r = await pool.request()
+            .input("account", sql.NVarChar(100), account)
+            .input("offset", sql.Int, page * pageSize)
+            .input("pageSize", sql.Int, pageSize)
+            .query(q);
+
+        // Return a plain array for Angular
+        res.json(r.recordset || []);
+    } catch (err) {
+        console.error("Error fetching demand letter history:", err);
+        res.status(500).json({ error: err.message || "Server error" });
+    }
+});
 
 
 const PORT = process.env.PORT || 8004;
