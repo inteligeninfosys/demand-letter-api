@@ -19,9 +19,11 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "fs-extra": "^11.3.2",
+    "jose": "^6.1.1",
     "mssql": "^12.1.0",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.10",
-    "pizzip": "^3.2.0"
+    "pizzip": "^3.2.0",
+    "username": "^7.0.0"
   }
 }

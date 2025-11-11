@@ -18,6 +18,8 @@ import os from "os";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import sql from "mssql";
+import { authenticate } from './auth.js';
+
 dayjs.extend(utc);
 const require = createRequire(import.meta.url);
 
@@ -168,25 +170,6 @@ async function renderDocxFromTemplate(templatePath, data) {
         guarantors: Array.isArray(data?.guarantors) ? data.guarantors : [],
     });
 
-    const modelss = {
-        our_ref: safe(data.our_ref),
-        date: safe(data.date || dayjs().format("YYYY-MM-DD")),
-        customer: {
-            name: data?.customer?.name,
-            account_number: safe(data?.customer?.account_number),
-            address_line_1: safe(data?.customer?.address_line_1),
-            address_line_2: safe(data?.customer?.address_line_2),
-        },
-        loan: {
-            principal_amount: safe(data?.loan?.principal_amount),
-            arrears_amount: safe(data?.loan?.arrears_amount),
-            interest_rate: safe(data?.loan?.interest_rate),
-            number: safe(data?.loan?.number),
-        },
-        guarantors: Array.isArray(data?.guarantors)
-            ? data.guarantors.map((g) => ({ name: safe(g.name), address: safe(g.address) }))
-            : [],
-    };
 
     // Helpful diagnostics for common mistakes
     // (a) quick presence check for keys you mentioned
@@ -561,7 +544,8 @@ app.put("/demand-letters-api/templates/:code/current", async (req, res) => {
 });
 
 // Generate (DOCX/PDF) from a specific template code (+optional version)
-app.post("/demand-letters-api/letters", async (req, res) => {
+app.post("/demand-letters-api/letters", authenticate, async (req, res) => {
+
     try {
         const {
             template_code = "DL1",
@@ -596,7 +580,7 @@ app.post("/demand-letters-api/letters", async (req, res) => {
             : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
         // Who sent (from Keycloak/req header/user claim)
-        const sent_by = (req.user?.preferred_username || req.user?.email || req.headers['x-user'] || 'unknown');
+        const sent_by = (req.user?.username || req.user?.email || req.headers['x-user'] || 'unknown');
 
         // Filename for non-persist responses
         const baseName = `${account}_${template}_${timestamp}.${ext}`;
@@ -821,10 +805,10 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
             to,
             cc,
             bcc,
-            subject: subject || `Demand Letter – ${account}`,
+            subject: subject || `Demand Letter – ${data?.customer?.account_number}`,
             text:
                 body ||
-                `Dear Customer,\n\nPlease find attached your demand letter for account ${account}.\n\nRegards,\nRecoveries Team`,
+                `Dear Customer,\n\nPlease find attached your demand letter for account ${data?.customer?.account_number}.\n\nRegards,\nRecoveries Team`,
             html: htmlBody,
             attachments: [
                 {
