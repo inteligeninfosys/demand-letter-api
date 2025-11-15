@@ -151,22 +151,98 @@ async function renderDocxFromTemplate(templatePath, data) {
         return v;
     }
 
-    const model = sanitize({
-        ...data,
-        customer: {
-            ...data?.customer,
-            // trim padded account numbers from core banking
-            account_number: (data?.customer?.account_number || "").toString().trim(),
-            customer_number: data?.customer?.customer_number ?? "",
-        },
-        loan: {
-            ...data?.loan,
-            // if you have numeric copies, keep them; else keep strings
-            days_in_arrears: data?.loan?.days_in_arrears ?? "",
-            outstanding_balance: data?.loan?.outstanding_balance ?? "",
-        },
-        guarantors: Array.isArray(data?.guarantors) ? data.guarantors : [],
+function formatCurrency(value) {
+    if (value === null || value === undefined || value === '') return '';
+    
+    // Convert to string and clean up
+    let cleaned = String(value).trim();
+    
+    // Remove any non-numeric characters except dots, minus signs, and commas
+    cleaned = cleaned.replace(/,/g, '');
+    
+    // Extract just the numeric part (including decimals and negative sign)
+    const match = cleaned.match(/^-?\d+\.?\d*/);
+    
+    if (!match) {
+        console.warn(`formatCurrency: Could not parse value: "${value}"`);
+        return '';
+    }
+    
+    const num = Number(match[0]);
+    
+    if (isNaN(num)) {
+        console.warn(`formatCurrency: NaN after parsing: "${value}"`);
+        return '';
+    }
+    
+    // Take absolute value (no negative amounts in demand letters)
+    const absNum = Math.abs(num);
+    
+    // Format with commas
+    const formatted = absNum.toLocaleString('en-US', { 
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2 
     });
+    
+    // Return with KES prefix
+    return `KES ${formatted}`;
+}
+
+// Helper to clean and extract numeric values
+function cleanNumeric(value) {
+    if (value === null || value === undefined || value === '') return '';
+    let cleaned = String(value).trim().replace(/,/g, '');
+    const match = cleaned.match(/^-?\d+\.?\d*/);
+    return match ? match[0] : '';
+}
+
+// Helper for interest rate formatting
+function formatInterestRate(value) {
+    if (value === null || value === undefined || value === '' || value === 'xx') return '';
+    
+    const cleaned = cleanNumeric(value);
+    if (!cleaned) return '';
+    
+    const num = Number(cleaned);
+    if (isNaN(num)) return '';
+    
+    // Format as percentage (e.g., "12%" or "12.5%")
+    return `${num}%`;
+}
+
+const model = sanitize({
+    ...data,
+    customer: {
+        ...data?.customer,
+        account_number: (data?.customer?.account_number || "").toString().trim(),
+        customer_number: data?.customer?.customer_number ?? "",
+    },
+    loan: {
+        ...data?.loan,
+        days_in_arrears: data?.loan?.days_in_arrears ?? "",
+        // Format all currency fields
+        outstanding_balance: formatCurrency(data?.loan?.outstanding_balance),
+        arrears_amount: formatCurrency(data?.loan?.arrears_amount),
+        overdue_principal: formatCurrency(data?.loan?.overdue_principal),
+        overdue_interest: formatCurrency(data?.loan?.overdue_interest),
+        penalty_amount: formatCurrency(data?.loan?.penalty_amount),
+        // Format interest rate
+        interest_rate: formatInterestRate(data?.loan?.interest_rate),
+    },
+    guarantors: Array.isArray(data?.guarantors) && data.guarantors.length > 0 ? data.guarantors : undefined,
+});
+
+    console.log('=== DOCX RENDERING DEBUG ===');
+    console.log('loan.outstanding_balance:', data?.loan?.outstanding_balance, 'type:', typeof data?.loan?.outstanding_balance);
+    console.log('loan.arrears_amount:', data?.loan?.arrears_amount, 'type:', typeof data?.loan?.arrears_amount);
+    console.log('Full loan object:', JSON.stringify(data?.loan, null, 2));
+    console.log('After formatting:');
+    console.log('model.loan.outstanding_balance:', model?.loan?.outstanding_balance);
+    console.log('model.loan.arrears_amount:', model?.loan?.arrears_amount);
+    console.log('============================');
+
+    doc.render(model);
+    return doc.getZip().generate({ type: "nodebuffer" });
 
     const modelss = {
         our_ref: safe(data.our_ref),
@@ -694,13 +770,26 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
         const docxBuffer = await renderDocxFromTemplate(p, data);
         const pdf = await docxToPdfBuffer(docxBuffer);
 
-        // Build filename e.g. L0012142_demand1_YYYYMMDD_HHmmss.pdf
-        const account = (data?.customer?.account_number || "unknown").replace(/[^\w.-]+/g, "_");
-        const template = (template_code || "demand").replace(/[^\w.-]+/g, "_");
-        const timestamp = dayjs().format("YYYYMMDD_HHmmss");
-        const filename = `${account}_${template}_${timestamp}.pdf`;
+// Build filename e.g. L0012142_demand1_YYYYMMDD_HHmmss.pdf
+const account = (data?.customer?.account_number || "unknown").replace(/[^\w.-]+/g, "_");
+const template = (template_code || "demand").replace(/[^\w.-]+/g, "_");
+const timestamp = dayjs().format("YYYYMMDD_HHmmss");
+const filename = `${account}_${template}_${timestamp}.pdf`;
 
-        const { transport, from } = makeMailer();
+// Mask the account number for email subject (show first and last character only)
+const maskAccountNumber = (acc) => {
+  if (!acc || acc.length < 2) return acc;
+  const firstChar = acc.charAt(0);
+  const lastChar = acc.charAt(acc.length - 1);
+  const masked = 'X'.repeat(Math.max(0, acc.length - 2));
+  return `${firstChar}${masked}${lastChar}`;
+};
+
+const maskedAccount = maskAccountNumber(data?.customer?.account_number || account);
+
+const { transport, from } = makeMailer();
+
+        
 
         // build a nice HTML version
         const htmlBody = `
@@ -771,7 +860,7 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 
         <p>
           We hope this message finds you well. This is a reminder that your
-          loan account <strong>${data?.customer?.account_number || account}</strong> 
+          loan account <strong>${maskedAccount}</strong> 
           is currently in arrears.
         </p>
 
@@ -814,16 +903,22 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 </html>
 `;
 
+console.log('=== EMAIL DEBUG ===');
+console.log('Account number:', data?.customer?.account_number);
+console.log('Account variable:', account);
+console.log('Masked account:', maskedAccount);
+console.log('Subject param:', subject);
+console.log('Final subject:', subject || `Demand Letter - ${maskedAccount}`);
+console.log('===================');
 
-        // now send using nodemailer
-        const mail = await transport.sendMail({
-            from,
-            to,
-            cc,
-            bcc,
-            subject: subject || `Demand Letter – ${account}`,
-            text:
-                body ||
+// now send using nodemailer
+const mail = await transport.sendMail({
+    from,
+    to,
+    cc,
+    bcc,
+    subject: subject || `Demand Letter - ${maskedAccount}`,
+    text:       body ||
                 `Dear Customer,\n\nPlease find attached your demand letter for account ${account}.\n\nRegards,\nRecoveries Team`,
             html: htmlBody,
             attachments: [
