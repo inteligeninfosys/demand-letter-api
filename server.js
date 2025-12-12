@@ -412,6 +412,7 @@ function makeMailer() {
     const pass = process.env.EMAIL_PASS;
     const from = process.env.EMAIL_FROM || user;
 
+
     if (!host || !user || !pass) {
         throw new Error("Email not configured: set EMAIL_HOST, EMAIL_USER, EMAIL_PASS");
     }
@@ -651,6 +652,21 @@ app.post("/demand-letters-api/letters/preview", async (req, res) => {
     }
 });
 
+function maskAccountNumber(accountNumber) {
+  if (!accountNumber) return '';
+
+  // Convert to string just in case
+  const str = String(accountNumber).trim();
+
+  if (str.length <= 3) return str;
+
+  // Keep first 3 characters and mask the rest with *
+  const visible = str.slice(0, 3);
+  const hidden = '*'.repeat(str.length - 3);
+
+  return visible + hidden;
+}
+
 // POST /demand-letters-api/letters/email
 // Body: { template_code, template_version?, data, to, cc?, bcc?, subject?, body? }
 app.post("/demand-letters-api/letters/email", async (req, res) => {
@@ -755,7 +771,7 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 
         <p>
           We hope this message finds you well. This is a reminder that your
-          loan account <strong>${data?.customer?.account_number || account}</strong> 
+          loan account <strong>${maskAccountNumber(data?.customer?.account_number) || maskAccountNumber(account)}</strong> 
           is currently in arrears.
         </p>
 
@@ -805,7 +821,7 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
             to,
             cc,
             bcc,
-            subject: subject || `Demand Letter – ${data?.customer?.account_number}`,
+            subject: `Demand Letter - ${maskAccountNumber(data?.customer?.account_number)}`,
             text:
                 body ||
                 `Dear Customer,\n\nPlease find attached your demand letter for account ${data?.customer?.account_number}.\n\nRegards,\nRecoveries Team`,
