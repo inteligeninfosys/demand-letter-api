@@ -70,16 +70,6 @@ async function readMeta(code) {
     return JSON.parse(await fs.readFile(p, "utf8"));
 }
 
-async function resolveTemplatePathxx(code, version) {
-    const dir = path.join(TEMPLATES_DIR, safeCode(code));
-    const file = version ? `${version}.docx` : "current.docx";
-    const p = path.join(dir, file);
-    if (!(await exists(p))) {
-        throw new Error(`Template not found: ${code}/${file}`);
-    }
-    return p;
-}
-
 // Robust resolver
 async function resolveTemplatePath(template_code, template_version = null) {
     if (!template_code) throw new Error("template_code is required");
