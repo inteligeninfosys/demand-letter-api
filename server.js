@@ -2,7 +2,6 @@
 import 'dotenv/config';
 import express from "express";
 import fs from "fs/promises";
-import { spawn } from "child_process";
 import cors from 'cors';
 import path from "path";
 import { fileURLToPath } from "url";
@@ -18,6 +17,10 @@ import os from "os";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import sql from "mssql";
+import { getLogger } from './logging/logger.js';
+import { requestLoggingMiddleware } from './logging/express-middleware.js';
+import requestIdMiddleware from "./middleware/request-id.js";
+
 import { authenticate } from './auth.js';
 
 dayjs.extend(utc);
@@ -34,6 +37,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "4mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(requestIdMiddleware);
+// init shared logger once
+getLogger({
+    serviceName: 'demands-api',
+    rabbitmqUrl: process.env.RABBITMQ_URL,
+});
+// attach logging middleware here so every request has req.log
+app.use(requestLoggingMiddleware());
 
 const TEMPLATES_DIR = path.join(__dirname, "templates");
 const upload = multer({ storage: multer.memoryStorage() });
@@ -425,7 +437,7 @@ function generateIdemKey(template_code, account_number) {
 
 // If the sequence exists, we’ll use it; else fallback to time+random (still unique).
 async function generateOurRef({ template_code, account_number }) {
-    const prefix = (process.env.OUR_REF_PREFIX || "STIMA/REC").trim();
+    const prefix = (process.env.OUR_REF_PREFIX || "KB/REC").trim();
     const tmpl = (template_code || "DEMAND").toUpperCase().replace(/[^\w/-]+/g, "");
     const yyyy = dayjs().utc().format("YYYY");
 
@@ -441,10 +453,10 @@ async function generateOurRef({ template_code, account_number }) {
     if (!seq) {
         const ts = dayjs().utc().format("YYYYMMDDHHmmss");
         const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-        return `${prefix}/${tmpl}/${yyyy}/${ts}-${rand}`; // e.g. STIMA/REC/DEMAND1/2025/20251107...-ABCD
+        return `${prefix}/${tmpl}/${yyyy}/${ts}-${rand}`; // e.g. KB/REC/DEMAND1/2025/20251107...-ABCD
     }
 
-    return `${prefix}/${tmpl}/${yyyy}/${seq}`; // e.g. STIMA/REC/DEMAND1/2025/100321
+    return `${prefix}/${tmpl}/${yyyy}/${seq}`; // e.g. KB/REC/DEMAND1/2025/100321
 }
 
 /* ---------- Tiny cache (per code+version) ---------- */
@@ -535,11 +547,11 @@ app.put("/demand-letters-api/templates/:code/current", async (req, res) => {
 });
 
 // Generate (DOCX/PDF) from a specific template code (+optional version)
-app.post("/demand-letters-api/letters", authenticate, async (req, res) => {
+app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => {
 
     try {
         const {
-            template_code = "DL1",
+            template_code = "DL1_KB",
             template_version = null,
             format = "docx",
             sendoption = 'PREVIEW',
@@ -606,7 +618,9 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res) => {
 
     } catch (err) {
         console.log(err)
-        res.status(400).json({ error: err?.message || String(err) });
+        //res.status(400).json({ error: err?.message || String(err) });
+        req.log.error('account info error', { error: err.message }, req);
+        next(err);
     }
 });
 
@@ -643,18 +657,18 @@ app.post("/demand-letters-api/letters/preview", async (req, res) => {
 });
 
 function maskAccountNumber(accountNumber) {
-  if (!accountNumber) return '';
+    if (!accountNumber) return '';
 
-  // Convert to string just in case
-  const str = String(accountNumber).trim();
+    // Convert to string just in case
+    const str = String(accountNumber).trim();
 
-  if (str.length <= 3) return str;
+    if (str.length <= 3) return str;
 
-  // Keep first 3 characters and mask the rest with *
-  const visible = str.slice(0, 3);
-  const hidden = '*'.repeat(str.length - 3);
+    // Keep first 3 characters and mask the rest with *
+    const visible = str.slice(0, 3);
+    const hidden = '*'.repeat(str.length - 3);
 
-  return visible + hidden;
+    return visible + hidden;
 }
 
 // POST /demand-letters-api/letters/email
@@ -713,7 +727,7 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
         border-radius: 8px;
         overflow: hidden;
         box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-        border-top: 4px solid #ffc20e;
+        border-top: 4px solid #6d9ad1ff;
       }
       .header {
         background-color: #e87722;
@@ -733,8 +747,8 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
       .btn {
         display: inline-block;
         padding: 0.6rem 1.25rem;
-        background-color: #e87722;
-        color: #ffffff !important;
+        background-color: #3e93e7ff;
+        color: #5697d3ff !important;
         border-radius: 4px;
         text-decoration: none;
         font-weight: 600;
@@ -748,14 +762,14 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
         border-top: 1px solid #eee;
       }
       a {
-        color: #e87722;
+        color: #227ee8ff;
         text-decoration: none;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <div class="header">Stima-Sacco – Demand Letter</div>
+      <div class="header">Kingdom Bank Kenya – Demand Letter</div>
       <div class="content">
         <p>Dear <strong>${data?.customer?.name || "Member"}</strong>,</p>
 
@@ -776,17 +790,17 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
         </p>
 
         <p style="margin-top:1rem;">
-          <a href="mailto:recoveries@stima-sacco.com" class="btn">Contact Recoveries</a>
+          <a href="mailto:recoveries@kingdombankltd.co.ke" class="btn">Contact Recoveries</a>
         </p>
 
         <p>
-          Thank you for being a valued member of Stima Sacco Kenya.
+          Thank you for being a valued member of Kingdom Bank Kenya.
           We appreciate your prompt attention to this matter.
         </p>
 
         <p>Warm regards,<br />
         <strong>Recoveries Department</strong><br />
-        Stima Sacco Kenya</p>
+        Kingdom Bank Kenya</p>
       </div>
       <div class="footer">
         <p>
@@ -795,8 +809,8 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
           please notify us immediately and delete it.
         </p>
         <p>
-          Stima Sacco Kenya | P.O. Box 75629–00200 Nairobi | 
-          <a href="https://www.stima-sacco.com">www.stima-sacco.com</a>
+          Kingdom Bank Kenya | P.O. Box 22741- 00400 Nairobi | 
+          <a href="https://www.kingdombankltd.co.ke">www.kingdombankltd.co.ke</a>
         </p>
       </div>
     </div>
@@ -917,6 +931,22 @@ app.get("/demand-letters-api/letters/history", async (req, res) => {
     }
 });
 
+app.use((err, req, res, next) => {
+    const requestId =
+        err.requestId ||
+        req.requestId ||
+        req.headers['x-request-id'] 
+
+    res.header('Access-Control-Expose-Headers', 'X-Request-Id');
+    res.setHeader('x-request-id', requestId);
+    
+
+    return res.status(err.status || 500).json({
+        ok: false,
+        error: err.message || 'Internal server error',
+        requestId,
+    });
+});
 
 const PORT = process.env.PORT || 8004;
 app.listen(PORT, () => console.log(`Demand Letter API listening on :${PORT}`));

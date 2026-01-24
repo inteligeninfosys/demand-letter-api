@@ -65,7 +65,7 @@ spec:
         fsGroup: 1000
       containers:
         - name: demand-api
-          image: docker.io/inteligeninfosys/demand-api-kb:1.0
+          image: docker.io/inteligeninfosys/demand-api-kb:1.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8004

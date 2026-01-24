@@ -1,4 +1,3 @@
-// server/auth.js
 import 'dotenv/config';
 import fs from 'fs';
 import https from 'https';
@@ -6,7 +5,6 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 // ───────────────────────────────────────────────────────────────────────────────
 // ENV
-// Use your existing variable names, with sane fallbacks
 const ISSUER   = (process.env.KEYCLOAK_ISSUER || '').replace(/\/$/, ''); // e.g. https://keycloak.stima-sacco.local/realms/stima-realm
 const AUDIENCE = (process.env.KEYCLOAK_AUDIENCE || '').trim();           // optional: if blank we won't enforce aud
 const JWKS_URL = process.env.KEYCLOAK_JWKS_URL || `${ISSUER}/protocol/openid-connect/certs`;
