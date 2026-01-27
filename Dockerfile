@@ -36,9 +36,9 @@ USER node
 
 EXPOSE 8004
 
-# tini forwards signals so LibreOffice/child procs exit cleanly
+# tini forwards signals so LibreOffice/child procs exit cleanly 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 CMD ["node", "server.js"]
 
-# docker build -t docker.io/inteligeninfosys/demand-letters-api-kb:1.1 .
+# docker build -t docker.io/inteligeninfosys/demand-letters-api-sid:202601272049 .

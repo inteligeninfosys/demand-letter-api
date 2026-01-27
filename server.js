@@ -923,7 +923,7 @@ app.get("/demand-letters-api/letters/history", async (req, res) => {
             .input("pageSize", sql.Int, pageSize)
             .query(q);
 
-        // Return a plain array for Angular
+        // Return a plain array for Angular 
         res.json(r.recordset || []);
     } catch (err) {
         console.error("Error fetching demand letter history:", err);
