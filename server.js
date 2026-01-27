@@ -87,10 +87,10 @@ async function resolveTemplatePath(template_code, template_version = null) {
     if (!template_code) throw new Error("template_code is required");
 
     // 1) sanitize inputs (trim spaces, normalize)
-    const code = String(template_code).trim();                // e.g. 'DL1'
+    const code = String(template_code).trim();                // e.g. 'F_F'
     const verIn = (template_version ?? "current").toString().trim();
 
-    // If caller passed a full filename like "current.docx" or "DL1_v2.docx", use it as-is
+    // If caller passed a full filename like "current.docx" or "F_F_v2.docx", use it as-is
     const isFileName = /\.(docx)$/i.test(verIn);
     const fileName = isFileName ? verIn : `${verIn}.docx`;    // "current" -> "current.docx"
 
@@ -106,8 +106,8 @@ async function resolveTemplatePath(template_code, template_version = null) {
     const tried = [];
     for (const root of roots) {
         tried.push(
-            path.join(root, code, fileName),                // /app/templates/DL1/current.docx
-            path.join(root, `${code}.docx`)                 // /app/templates/DL1.docx (fallback)
+            path.join(root, code, fileName),                // /app/templates/F_F/current.docx
+            path.join(root, `${code}.docx`)                 // /app/templates/F_F.docx (fallback)
         );
     }
 
@@ -138,8 +138,8 @@ async function renderDocxFromTemplate(templatePath, data) {
     const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
         linebreaks: true,
-        //delimiters: { start: "[[", end: "]]" }, // matches your templates
-        //nullGetter: () => "",                      // return empty string for missing values
+        delimiters: { start: "[[", end: "]]" }, // matches your templates
+        nullGetter: () => "",                      // return empty string for missing values
     });
 
     const safe = (v) => (v === null || v === undefined ? "" : v);
@@ -155,34 +155,139 @@ async function renderDocxFromTemplate(templatePath, data) {
         return v;
     }
 
-    const model = sanitize({
-        ...data,
-        customer: {
-            ...data?.customer,
-            // trim padded account numbers from core banking
-            account_number: (data?.customer?.account_number || "").toString().trim(),
-            customer_number: data?.customer?.customer_number ?? "",
-        },
-        loan: {
-            ...data?.loan,
-            // if you have numeric copies, keep them; else keep strings
-            days_in_arrears: data?.loan?.days_in_arrears ?? "",
-            outstanding_balance: data?.loan?.outstanding_balance ?? "",
-        },
-        guarantors: Array.isArray(data?.guarantors) ? data.guarantors : [],
-    });
+// Enhanced mapping to handle all DB field variations
+const model = sanitize({
+  ...data,
+
+  // Top-level fields
+  our_ref: data?.our_ref ?? "",
+  date: data?.date ?? dayjs().format("YYYY-MM-DD"),
+
+  customer: {
+    ...data?.customer,
+
+    // Map DB field → template field (handle all variations)
+    name: data?.customer?.name
+          ?? data?.CLIENTNAME
+          ?? data?.customer.name
+          ?? "",
+
+    account_number: (
+      data?.customer?.account_number
+      ?? data?.ACCNUMBER
+      ?? data?.customer.account_number
+      ?? ""
+    ).toString().trim(),
+
+    customer_number:
+      data?.customer?.customer_number
+      ?? data?.CUSTOMERNO
+      ?? data?.CLIENTID
+      ?? "",
+
+    // Address fields
+    address_line_1: data?.customer?.address_line_1
+                    ?? data?.ADDRESS_1
+                    ?? data?.customer?.address_1
+                    ?? "",
+
+    address_line_2: data?.customer?.address_line_2
+                    ?? data?.ADDRESS_2
+                    ?? data?.customer?.address_2
+                    ?? "",
+
+    town: data?.customer?.town
+          ?? data?.TOWN
+          ?? "",
+
+    email: data?.customer?.email
+           ?? data?.EMAIL
+           ?? "",
+
+    phone_1: data?.customer?.phone_1
+             ?? data?.PHONE_1
+             ?? "",
+
+    phone_2: data?.customer?.phone_2
+             ?? data?.PHONE_2
+             ?? "",
+  },
+
+  loan: {
+    ...data?.loan,
+
+    outstanding_balance:
+      data?.loan?.outstanding_balance
+      ?? data?.OUSTBALANCE
+      ?? data?.OUTSTANDING_BALANCE
+      ?? data?.TOTALOVERDUEAMOUNT
+      ?? "",
+
+    original_balance:
+      data?.loan?.original_balance
+      ?? data?.ORIGBALANCE
+      ?? "",
+
+    days_in_arrears:
+      data?.loan?.days_in_arrears
+      ?? data?.DAYSINARR
+      ?? data?.DAYS_IN_ARREARS
+      ?? "",
+
+    arrears_amount:
+      data?.loan?.arrears_amount
+      ?? data?.PRINCARREARS
+      ?? data?.arrears_amount
+      ?? "",
+
+    penalty_arrears:
+      data?.loan?.penalty_arrears
+      ?? data?.PENALARREARS
+      ?? "",
+
+    interest_rate:
+      data?.loan?.interest_rate
+      ?? data?.INTRATE
+      ?? "",
+
+    installment_amount:
+      data?.loan?.installment_amount
+      ?? data?.INSTAMOUNT
+      ?? "",
+
+    product_code:
+      data?.loan?.product_code
+      ?? data?.PRODUCTCODE
+      ?? "",
+
+    maturity_date:
+      data?.loan?.maturity_date
+      ?? data?.MATDATE
+      ?? "",
+  },
+
+  guarantors: Array.isArray(data?.guarantors)
+    ? data.guarantors
+    : [],
+});
+
 
 
     // Helpful diagnostics for common mistakes
-    // (a) quick presence check for keys you mentioned
+    // Enhanced diagnostics to check all fields
     const dbg = {
+        "our_ref": model?.our_ref,
+        "date": model?.date,
         "customer.name": model?.customer?.name,
         "customer.account_number": model?.customer?.account_number,
+        "customer.address_line_1": model?.customer?.address_line_1,
+        "customer.town": model?.customer?.town,
         "loan.outstanding_balance": model?.loan?.outstanding_balance,
         "loan.days_in_arrears": model?.loan?.days_in_arrears,
     };
+    console.log("[DOCX] Rendering with data model:", JSON.stringify(dbg, null, 2));
     Object.entries(dbg).forEach(([k, v]) => {
-        if (v === "") console.warn(`[DOCX] value empty for tag: ${k}`);
+        if (v === "") console.warn(`[DOCX] ⚠️ value empty for tag: ${k}`);
     });
 
 
@@ -435,7 +540,7 @@ function generateIdemKey(template_code, account_number) {
     return `${t}_${acc}_${ts}_${rand}`;
 }
 
-// If the sequence exists, we’ll use it; else fallback to time+random (still unique).
+// If the sequence exists, we'll use it; else fallback to time+random (still unique).
 async function generateOurRef({ template_code, account_number }) {
     const prefix = (process.env.OUR_REF_PREFIX || "KB/REC").trim();
     const tmpl = (template_code || "DEMAND").toUpperCase().replace(/[^\w/-]+/g, "");
@@ -551,7 +656,7 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
 
     try {
         const {
-            template_code = "DL1_KB",
+            template_code = "DL_7",
             template_version = null,
             format = "docx",
             sendoption = 'PREVIEW',
@@ -629,7 +734,7 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
 app.post("/demand-letters-api/letters/preview", async (req, res) => {
     try {
         const {
-            template_code = "DL1",
+            template_code = "F_F",
             template_version = null,
             data = {},
             kind = "png",           // default png preview
@@ -676,7 +781,7 @@ function maskAccountNumber(accountNumber) {
 app.post("/demand-letters-api/letters/email", async (req, res) => {
     try {
         const {
-            template_code = "DL1",
+            template_code = "F_F",
             template_version = null,
             data = {},
             to,
