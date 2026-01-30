@@ -155,121 +155,121 @@ async function renderDocxFromTemplate(templatePath, data) {
         return v;
     }
 
-// Enhanced mapping to handle all DB field variations
-const model = sanitize({
-  ...data,
+    // Enhanced mapping to handle all DB field variations
+    const model = sanitize({
+        ...data,
 
-  // Top-level fields
-  our_ref: data?.our_ref ?? "",
-  date: data?.date ?? dayjs().format("YYYY-MM-DD"),
+        // Top-level fields
+        our_ref: data?.our_ref ?? "",
+        date: data?.date ?? dayjs().format("YYYY-MM-DD"),
 
-  customer: {
-    ...data?.customer,
+        customer: {
+            ...data?.customer,
 
-    // Map DB field → template field (handle all variations)
-    name: data?.customer?.name
-          ?? data?.CLIENTNAME
-          ?? data?.customer.name
-          ?? "",
+            // Map DB field → template field (handle all variations)
+            name: data?.customer?.name
+                ?? data?.CLIENTNAME
+                ?? data?.customer.name
+                ?? "",
 
-    account_number: (
-      data?.customer?.account_number
-      ?? data?.ACCNUMBER
-      ?? data?.customer.account_number
-      ?? ""
-    ).toString().trim(),
+            account_number: (
+                data?.customer?.account_number
+                ?? data?.ACCNUMBER
+                ?? data?.customer.account_number
+                ?? ""
+            ).toString().trim(),
 
-    customer_number:
-      data?.customer?.customer_number
-      ?? data?.CUSTOMERNO
-      ?? data?.CLIENTID
-      ?? "",
+            customer_number:
+                data?.customer?.customer_number
+                ?? data?.CUSTOMERNO
+                ?? data?.CLIENTID
+                ?? "",
 
-    // Address fields
-    address_line_1: data?.customer?.address_line_1
-                    ?? data?.ADDRESS_1
-                    ?? data?.customer?.address_1
-                    ?? "",
+            // Address fields
+            address_line_1: data?.customer?.address_line_1
+                ?? data?.ADDRESS_1
+                ?? data?.customer?.address_1
+                ?? "",
 
-    address_line_2: data?.customer?.address_line_2
-                    ?? data?.ADDRESS_2
-                    ?? data?.customer?.address_2
-                    ?? "",
+            address_line_2: data?.customer?.address_line_2
+                ?? data?.ADDRESS_2
+                ?? data?.customer?.address_2
+                ?? "",
 
-    town: data?.customer?.town
-          ?? data?.TOWN
-          ?? "",
+            town: data?.customer?.town
+                ?? data?.TOWN
+                ?? "",
 
-    email: data?.customer?.email
-           ?? data?.EMAIL
-           ?? "",
+            email: data?.customer?.email
+                ?? data?.EMAIL
+                ?? "",
 
-    phone_1: data?.customer?.phone_1
-             ?? data?.PHONE_1
-             ?? "",
+            phone_1: data?.customer?.phone_1
+                ?? data?.PHONE_1
+                ?? "",
 
-    phone_2: data?.customer?.phone_2
-             ?? data?.PHONE_2
-             ?? "",
-  },
+            phone_2: data?.customer?.phone_2
+                ?? data?.PHONE_2
+                ?? "",
+        },
 
-  loan: {
-    ...data?.loan,
+        loan: {
+            ...data?.loan,
 
-    outstanding_balance:
-      data?.loan?.outstanding_balance
-      ?? data?.OUSTBALANCE
-      ?? data?.OUTSTANDING_BALANCE
-      ?? data?.TOTALOVERDUEAMOUNT
-      ?? "",
+            outstanding_balance:
+                data?.loan?.outstanding_balance
+                ?? data?.OUSTBALANCE
+                ?? data?.OUTSTANDING_BALANCE
+                ?? data?.TOTALOVERDUEAMOUNT
+                ?? "",
 
-    original_balance:
-      data?.loan?.original_balance
-      ?? data?.ORIGBALANCE
-      ?? "",
+            original_balance:
+                data?.loan?.original_balance
+                ?? data?.ORIGBALANCE
+                ?? "",
 
-    days_in_arrears:
-      data?.loan?.days_in_arrears
-      ?? data?.DAYSINARR
-      ?? data?.DAYS_IN_ARREARS
-      ?? "",
+            days_in_arrears:
+                data?.loan?.days_in_arrears
+                ?? data?.DAYSINARR
+                ?? data?.DAYS_IN_ARREARS
+                ?? "",
 
-    arrears_amount:
-      data?.loan?.arrears_amount
-      ?? data?.PRINCARREARS
-      ?? data?.arrears_amount
-      ?? "",
+            arrears_amount:
+                data?.loan?.arrears_amount
+                ?? data?.PRINCARREARS
+                ?? data?.arrears_amount
+                ?? "",
 
-    penalty_arrears:
-      data?.loan?.penalty_arrears
-      ?? data?.PENALARREARS
-      ?? "",
+            penalty_arrears:
+                data?.loan?.penalty_arrears
+                ?? data?.PENALARREARS
+                ?? "",
 
-    interest_rate:
-      data?.loan?.interest_rate
-      ?? data?.INTRATE
-      ?? "",
+            interest_rate:
+                data?.loan?.interest_rate
+                ?? data?.INTRATE
+                ?? "",
 
-    installment_amount:
-      data?.loan?.installment_amount
-      ?? data?.INSTAMOUNT
-      ?? "",
+            installment_amount:
+                data?.loan?.installment_amount
+                ?? data?.INSTAMOUNT
+                ?? "",
 
-    product_code:
-      data?.loan?.product_code
-      ?? data?.PRODUCTCODE
-      ?? "",
+            product_code:
+                data?.loan?.product_code
+                ?? data?.PRODUCTCODE
+                ?? "",
 
-    maturity_date:
-      data?.loan?.maturity_date
-      ?? data?.MATDATE
-      ?? "",
-  },
+            maturity_date:
+                data?.loan?.maturity_date
+                ?? data?.MATDATE
+                ?? "",
+        },
 
-  guarantors: Array.isArray(data?.guarantors)
-    ? data.guarantors
-    : [],
-});
+        guarantors: Array.isArray(data?.guarantors)
+            ? data.guarantors
+            : [],
+    });
 
 
 
@@ -1040,11 +1040,11 @@ app.use((err, req, res, next) => {
     const requestId =
         err.requestId ||
         req.requestId ||
-        req.headers['x-request-id'] 
+        req.headers['x-request-id']
 
     res.header('Access-Control-Expose-Headers', 'X-Request-Id');
     res.setHeader('x-request-id', requestId);
-    
+
 
     return res.status(err.status || 500).json({
         ok: false,

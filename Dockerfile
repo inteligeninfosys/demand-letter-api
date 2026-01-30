@@ -41,4 +41,4 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 
 CMD ["node", "server.js"]
 
-# docker build -t docker.io/inteligeninfosys/demand-letters-api-sid:202601272049 .
+# docker build -t docker.io/inteligeninfosys/demand-letters-api-sid:202601272145 .
