@@ -159,23 +159,19 @@ async function renderDocxFromTemplate(templatePath, data) {
 const model = sanitize({
   ...data,
 
-  // Top-level fields
   our_ref: data?.our_ref ?? "",
   date: data?.date ?? dayjs().format("YYYY-MM-DD"),
 
   customer: {
     ...data?.customer,
 
-    // Map DB field → template field (handle all variations)
     name: data?.customer?.name
           ?? data?.CLIENTNAME
-          ?? data?.customer.name
           ?? "",
 
     account_number: (
       data?.customer?.account_number
       ?? data?.ACCNUMBER
-      ?? data?.customer.account_number
       ?? ""
     ).toString().trim(),
 
@@ -185,15 +181,12 @@ const model = sanitize({
       ?? data?.CLIENTID
       ?? "",
 
-    // Address fields
     address_line_1: data?.customer?.address_line_1
                     ?? data?.ADDRESS_1
-                    ?? data?.customer?.address_1
                     ?? "",
 
     address_line_2: data?.customer?.address_line_2
                     ?? data?.ADDRESS_2
-                    ?? data?.customer?.address_2
                     ?? "",
 
     town: data?.customer?.town
@@ -237,7 +230,6 @@ const model = sanitize({
     arrears_amount:
       data?.loan?.arrears_amount
       ?? data?.PRINCARREARS
-      ?? data?.arrears_amount
       ?? "",
 
     penalty_arrears:
@@ -291,7 +283,22 @@ const model = sanitize({
     });
 
 
-    doc.render(model);
+        function flatten(obj, prefix = "", out = {}) {
+        for (const [k, v] of Object.entries(obj)) {
+            const key = prefix ? `${prefix}.${k}` : k;
+            if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+                out[key] = v;          // keep nested object for any loop blocks
+                flatten(v, key, out);  // flatten children to top-level
+            } else {
+                out[key] = v;
+            }
+        }
+        return out;
+    }
+
+    const flatModel = flatten(model);
+    console.log("[DOCX] Flat model keys:", Object.keys(flatModel));
+    doc.render(flatModel);
     return doc.getZip().generate({ type: "nodebuffer" });
 }
 
