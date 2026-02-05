@@ -11,11 +11,11 @@ data:
   # Match the Dockerfile; LO writes here (mounted as emptyDir below)
   LO_USER_INSTALLATION: "file:///tmp/lo_profile"
   # App-level defaults (override as needed)
-  EMAIL_HOST: "smtp.office365.com"
-  EMAIL_PORT: "587"
+  EMAIL_HOST: "192.168.12.16"
+  EMAIL_PORT: "25"
   EMAIL_SECURE: "false"
-  EMAIL_USER: developer@sidianbank.co.ke
-  EMAIL_FROM: "E-Collect <developer@sidianbank.co.ke>"
+  EMAIL_USER: ecollect@sidianbank.co.ke
+  EMAIL_FROM: "Credit Recoveries <ecollect@sidianbank.co.ke>"
   MSSQL_SERVER: '192.168.12.73'
   MSSQL_PORT: '31433'
   MSSQL_DATABASE: 'ecolsid'

@@ -291,7 +291,22 @@ async function renderDocxFromTemplate(templatePath, data) {
     });
 
 
-    doc.render(model);
+        function flatten(obj, prefix = "", out = {}) {
+        for (const [k, v] of Object.entries(obj)) {
+            const key = prefix ? `${prefix}.${k}` : k;
+            if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+                out[key] = v;          // keep nested object for any loop blocks
+                flatten(v, key, out);  // flatten children to top-level
+            } else {
+                out[key] = v;
+            }
+        }
+        return out;
+    }
+
+    const flatModel = flatten(model);
+    //console.log("[DOCX] Flat model keys:", Object.keys(flatModel));
+    doc.render(flatModel);
     return doc.getZip().generate({ type: "nodebuffer" });
 }
 
@@ -874,7 +889,7 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
   </head>
   <body>
     <div class="container">
-      <div class="header">Kingdom Bank Kenya – Demand Letter</div>
+      <div class="header">Sidian Bank Kenya – Demand Letter</div>
       <div class="content">
         <p>Dear <strong>${data?.customer?.name || "Member"}</strong>,</p>
 
@@ -895,17 +910,17 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
         </p>
 
         <p style="margin-top:1rem;">
-          <a href="mailto:recoveries@kingdombankltd.co.ke" class="btn">Contact Recoveries</a>
+          <a href="mailto:recoveries@Sidianbankltd.co.ke" class="btn">Contact Recoveries</a>
         </p>
 
         <p>
-          Thank you for being a valued member of Kingdom Bank Kenya.
+          Thank you for being a valued member of Sidian Bank Kenya.
           We appreciate your prompt attention to this matter.
         </p>
 
         <p>Warm regards,<br />
         <strong>Recoveries Department</strong><br />
-        Kingdom Bank Kenya</p>
+        Sidian Bank Kenya</p>
       </div>
       <div class="footer">
         <p>
@@ -914,8 +929,8 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
           please notify us immediately and delete it.
         </p>
         <p>
-          Kingdom Bank Kenya | P.O. Box 22741- 00400 Nairobi | 
-          <a href="https://www.kingdombankltd.co.ke">www.kingdombankltd.co.ke</a>
+          Sidian Bank Kenya | P.O. Box 22741- 00400 Nairobi | 
+          <a href="https://www.Sidianbankltd.co.ke">www.Sidianbankltd.co.ke</a>
         </p>
       </div>
     </div>
