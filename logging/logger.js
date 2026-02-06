@@ -2,9 +2,28 @@ import amqp from 'amqplib';
 
 const LEVELS = ['debug', 'info', 'warn', 'error'];
 
+function safeJson(x) {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(x, (k, v) => {
+      if (typeof v === "object" && v !== null) {
+        if (seen.has(v)) return "[Circular]";
+        seen.add(v);
+      }
+      if (v instanceof Error) {
+        return { name: v.name, message: v.message, stack: v.stack };
+      }
+      return v;
+    });
+  } catch (e) {
+    // last resort
+    return String(x);
+  }
+}
+
 class Logger {
   constructor(config = {}) {
-    this.serviceName = config.serviceName || process.env.SERVICE_NAME || 'ecollect-service';
+    this.serviceName = config.serviceName || process.env.SERVICE_NAME || 'demands-service';
     this.env = config.env || process.env.NODE_ENV || 'development';
     this.rabbitmqUrl = config.rabbitmqUrl || process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
     this.appVersion = config.appVersion || process.env.APP_VERSION || '0.0.0';
@@ -137,25 +156,26 @@ class Logger {
     const origDebug = console.debug;
 
     console.log = (...args) => {
-      const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      //const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      const msg = args.map(a => (typeof a === 'string' ? a : safeJson(a))).join(' ');
       this.info(msg);
       origLog.apply(console, args);
     };
 
     console.error = (...args) => {
-      const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      const msg = args.map(a => (typeof a === 'string' ? a : safeJson(a))).join(' ');
       this.error(msg);
       origError.apply(console, args);
     };
 
     console.warn = (...args) => {
-      const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      const msg = args.map(a => (typeof a === 'string' ? a : safeJson(a))).join(' ');
       this.warn(msg);
       origWarn.apply(console, args);
     };
 
     console.debug = (...args) => {
-      const msg = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+      const msg = args.map(a => (typeof a === 'string' ? a : safeJson(a))).join(' ');
       this.debug(msg);
       origDebug.apply(console, args);
     };

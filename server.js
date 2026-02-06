@@ -291,7 +291,7 @@ async function renderDocxFromTemplate(templatePath, data) {
     });
 
 
-        function flatten(obj, prefix = "", out = {}) {
+    function flatten(obj, prefix = "", out = {}) {
         for (const [k, v] of Object.entries(obj)) {
             const key = prefix ? `${prefix}.${k}` : k;
             if (v !== null && typeof v === "object" && !Array.isArray(v)) {
@@ -739,7 +739,17 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
     } catch (err) {
         console.log(err)
         //res.status(400).json({ error: err?.message || String(err) });
-        req.log.error('account info error', { error: err.message }, req);
+        //req.log.error('account info error', { error: err.message }, req);
+        req.log.error(
+            {
+                err, // let logger serialize the error safely
+                requestId: req.requestId,
+                route: req.originalUrl,
+                method: req.method,
+                user: req.user?.username || req.user?.email || req.headers['x-user'] || 'unknown',
+            },
+            'account info error'
+        );
         next(err);
     }
 });
@@ -826,112 +836,318 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 
         const { transport, from } = makeMailer();
 
-        // build a nice HTML version
+        // Build HTML body
         const htmlBody = `
 <!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: "Segoe UI", Arial, sans-serif;
-        background-color: #f4f4f4;
-        color: #2c2c2c;
-      }
-      .container {
-        max-width: 640px;
-        margin: 2rem auto;
-        background: #ffffff;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-        border-top: 4px solid #6d9ad1ff;
-      }
-      .header {
-        background-color: #e87722;
-        color: #ffffff;
-        padding: 1.25rem 1.75rem;
-        font-size: 1.25rem;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-      }
-      .content {
-        padding: 1.75rem;
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { 
+        margin: 0; 
+        padding: 0; 
+        font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif; 
+        background-color: #f5f5f5;
+        color: #2c3e50;
         line-height: 1.6;
       }
-      .content p {
-        margin: 0.9rem 0;
+      .email-wrapper {
+        width: 100%;
+        background-color: #f5f5f5;
+        padding: 40px 20px;
       }
-      .btn {
-        display: inline-block;
-        padding: 0.6rem 1.25rem;
-        background-color: #3e93e7ff;
-        color: #5697d3ff !important;
+      .email-container {
+        max-width: 650px;
+        margin: 0 auto;
+        background: #ffffff;
         border-radius: 4px;
-        text-decoration: none;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+      
+      /* Header with diagonal design */
+      .header {
+        position: relative;
+        background: linear-gradient(135deg, #5a6c7d 0%, #3d4b5a 50%, #2c3844 100%);
+        padding: 0;
+        height: 160px;
+        overflow: hidden;
+      }
+      .header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 40%;
+        height: 100%;
+        background: linear-gradient(135deg, transparent 0%, rgba(255, 215, 0, 0.15) 100%);
+        transform: skewX(-15deg);
+        transform-origin: top right;
+      }
+      .header-content {
+        position: relative;
+        z-index: 2;
+        padding: 30px 40px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .logo-section {
+        flex: 1;
+      }
+      .logo-text {
+        font-size: 32px;
+        font-weight: 300;
+        color: #ffffff;
+        letter-spacing: 0.5px;
+        margin: 0;
+      }
+      .logo-text strong {
         font-weight: 600;
-        margin-top: 1rem;
       }
-      .footer {
-        background-color: #fafafa;
-        padding: 1rem 1.75rem;
-        font-size: 0.85rem;
-        color: #555555;
-        border-top: 1px solid #eee;
+      .logo-accent {
+        color: #ffd700;
       }
-      a {
-        color: #227ee8ff;
+      .tagline {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.85);
+        font-style: italic;
+        margin-top: 4px;
+        letter-spacing: 0.5px;
+      }
+      
+      /* Yellow accent bar */
+      .accent-bar {
+        height: 6px;
+        background: linear-gradient(90deg, #ffd700 0%, #f0c419 100%);
+      }
+      
+      /* Main content */
+      .content {
+        padding: 45px 40px;
+      }
+      .greeting {
+        font-size: 16px;
+        color: #2c3e50;
+        margin-bottom: 25px;
+      }
+      .greeting strong {
+        color: #3d4b5a;
+        font-weight: 600;
+      }
+      
+      /* Notice box */
+      .notice-box {
+        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+        border-left: 4px solid #ffd700;
+        padding: 20px 24px;
+        margin: 25px 0;
+        border-radius: 0 4px 4px 0;
+      }
+      .notice-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #3d4b5a;
+        margin-bottom: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .notice-text {
+        font-size: 14px;
+        color: #495057;
+        line-height: 1.6;
+      }
+      .account-number {
+        font-weight: 700;
+        color: #2c3844;
+        font-size: 15px;
+        letter-spacing: 0.5px;
+      }
+      
+      /* Main text */
+      .main-text {
+        font-size: 15px;
+        color: #495057;
+        margin: 20px 0;
+        line-height: 1.7;
+      }
+      
+      /* CTA Button */
+      .cta-section {
+        text-align: center;
+        margin: 35px 0;
+      }
+      .cta-button {
+        display: inline-block;
+        padding: 14px 32px;
+        background: linear-gradient(135deg, #5a6c7d 0%, #3d4b5a 100%);
+        color: #ffffff !important;
         text-decoration: none;
+        border-radius: 4px;
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 12px rgba(93, 108, 125, 0.3);
+      }
+      .cta-button:hover {
+        background: linear-gradient(135deg, #3d4b5a 0%, #2c3844 100%);
+        box-shadow: 0 6px 16px rgba(93, 108, 125, 0.4);
+      }
+      
+      /* Signature */
+      .signature {
+        margin-top: 35px;
+        padding-top: 25px;
+        border-top: 1px solid #e9ecef;
+      }
+      .signature-text {
+        font-size: 14px;
+        color: #495057;
+        line-height: 1.8;
+      }
+      .department {
+        font-weight: 600;
+        color: #3d4b5a;
+      }
+      .bank-name {
+        font-weight: 600;
+        color: #2c3844;
+      }
+      
+      /* Footer */
+      .footer {
+        background: #2c3844;
+        padding: 30px 40px;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      .footer-content {
+        font-size: 12px;
+        line-height: 1.8;
+      }
+      .footer-divider {
+        height: 1px;
+        background: rgba(255, 215, 0, 0.3);
+        margin: 20px 0;
+      }
+      .footer-links {
+        margin-top: 15px;
+      }
+      .footer-link {
+        color: #ffd700;
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .footer-link:hover {
+        text-decoration: underline;
+      }
+      
+      /* Responsive */
+      @media only screen and (max-width: 600px) {
+        .email-wrapper { padding: 20px 10px; }
+        .header-content { padding: 25px 20px; }
+        .content { padding: 30px 20px; }
+        .footer { padding: 25px 20px; }
+        .logo-text { font-size: 24px; }
+        .header { height: 140px; }
       }
     </style>
   </head>
   <body>
-    <div class="container">
-      <div class="header">Sidian Bank Kenya – Demand Letter</div>
-      <div class="content">
-        <p>Dear <strong>${data?.customer?.name || "Member"}</strong>,</p>
-
-        <p>
-          We hope this message finds you well. This is a reminder that your
-          loan account <strong>${maskAccountNumber(data?.customer?.account_number) || maskAccountNumber(account)}</strong> 
-          is currently in arrears.
-        </p>
-
-        <p>
-          Please review the attached <strong>Demand Letter</strong> for details 
-          on your outstanding balance and repayment obligations.
-        </p>
-
-        <p>
-          To avoid additional interest or penalties, kindly make payment or 
-          contact our Recoveries Team immediately for assistance.
-        </p>
-
-        <p style="margin-top:1rem;">
-          <a href="mailto:recoveries@Sidianbankltd.co.ke" class="btn">Contact Recoveries</a>
-        </p>
-
-        <p>
-          Thank you for being a valued member of Sidian Bank Kenya.
-          We appreciate your prompt attention to this matter.
-        </p>
-
-        <p>Warm regards,<br />
-        <strong>Recoveries Department</strong><br />
-        Sidian Bank Kenya</p>
-      </div>
-      <div class="footer">
-        <p>
-          This email and any attachments are confidential and intended solely 
-          for the addressed recipient. If you received this message in error, 
-          please notify us immediately and delete it.
-        </p>
-        <p>
-          Sidian Bank Kenya | P.O. Box 22741- 00400 Nairobi | 
-          <a href="https://www.Sidianbankltd.co.ke">www.Sidianbankltd.co.ke</a>
-        </p>
+    <div class="email-wrapper">
+      <div class="email-container">
+        
+        <!-- Header -->
+        <div class="header">
+          <div class="header-content">
+            <div class="logo-section">
+              <h1 class="logo-text">
+                <strong>Sidian</strong><span class="logo-accent">Bank</span>
+              </h1>
+              <div class="tagline">Own Tomorrow</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Accent Bar -->
+        <div class="accent-bar"></div>
+        
+        <!-- Main Content -->
+        <div class="content">
+          <div class="greeting">
+            Dear <strong>${data?.customer?.name || "Valued Customer"}</strong>,
+          </div>
+          
+          <!-- Notice Box -->
+          <div class="notice-box">
+            <div class="notice-title">Important Notice</div>
+            <div class="notice-text">
+              Your loan account <span class="account-number">${maskAccountNumber(data?.customer?.account_number)}</span> 
+              is currently in arrears and requires immediate attention.
+            </div>
+          </div>
+          
+          <div class="main-text">
+            We wish to inform you that your account has fallen behind on scheduled payments. 
+            To help you understand your current position and next steps, we have attached a formal 
+            <strong>Demand Letter</strong> to this email.
+          </div>
+          
+          <div class="main-text">
+            Please review the attached document carefully. It contains detailed information about:
+          </div>
+          
+          <div class="main-text" style="padding-left: 20px;">
+            • Your current outstanding balance<br>
+            • The arrears amount and duration<br>
+            • Required actions and timelines<br>
+            • Payment options available to you
+          </div>
+          
+          <div class="main-text">
+            We understand that financial challenges can arise unexpectedly. Our Recoveries Team 
+            is ready to work with you to find a suitable resolution. Early communication can help 
+            prevent additional charges and protect your credit standing.
+          </div>
+          
+          <!-- CTA -->
+          <div class="cta-section">
+            <a href="mailto:recoveries@sidianbank.co.ke" class="cta-button">Contact Recoveries Team</a>
+          </div>
+          
+          <!-- Signature -->
+          <div class="signature">
+            <div class="signature-text">
+              Best regards,<br>
+              <span class="department">Recoveries Department</span><br>
+              <span class="bank-name">Sidian Bank</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+          <div class="footer-content">
+            <strong>Confidentiality Notice</strong><br>
+            This email and any attachments are confidential and intended solely for the addressee. 
+            If you have received this message in error, please notify us immediately and delete it 
+            from your system.
+            
+            <div class="footer-divider"></div>
+            
+            <strong>Sidian Bank Limited</strong><br>
+            P.O. Box 25363-00603, Nairobi, Kenya<br>
+            
+            <div class="footer-links">
+              <a href="https://www.sidianbank.co.ke" class="footer-link">www.sidianbank.co.ke</a> | 
+              <a href="mailto:info@sidianbank.co.ke" class="footer-link">info@sidianbank.co.ke</a>
+            </div>
+          </div>
+        </div>
+        
       </div>
     </div>
   </body>
@@ -959,31 +1175,42 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
             ],
         });
 
-        const saved = await saveLetterToMinioAndLog({
-            template_code,
-            data,
-            blob: pdf,                  // you already rendered to PDF for email
-            ext: 'pdf',
-            contentType: 'application/pdf',
-            sent_by: from,
-            provider_ref: mail.messageId,
-            our_ref: data.our_ref,
-            status: "SENT",
-        });
+        let saved;
 
-        res.json({
-            ok: true,
-            messageId: mail.messageId,
-            history_id: saved.id,
-            document_name: saved.document_name,
-            object_key: saved.key,
-            idem_key: saved.idem_key,
-            our_ref: data.our_ref,
-            url: saved.signedUrl,
-        });
+        try {
+            saved = await saveLetterToMinioAndLog({
+                template_code,
+                data,
+                blob: pdf,
+                ext: 'pdf',
+                contentType: 'application/pdf',
+                sent_by: from,
+                provider_ref: mail.messageId,
+                our_ref: data.our_ref,
+                status: "SENT",
+            });
+            console.log('saveLetterToMinioAndLog OK', { keys: Object.keys(saved || {}) });
+
+            res.json({
+                ok: true,
+                messageId: mail.messageId,
+                history_id: saved.id,
+                document_name: saved.document_name,
+                object_key: saved.key,
+                idem_key: saved.idem_key,
+                our_ref: data.our_ref,
+                url: saved.signedUrl,
+            });
+
+        } catch (e) {
+            console.error('saveLetterToMinioAndLog FAILED', e?.message, e);
+            return res.status(400).json({ ok: false, error: e?.message || String(e) });
+        }
+
     } catch (e) {
         console.log(e)
         res.status(400).json({ error: e?.message || String(e) });
+
     }
 });
 
