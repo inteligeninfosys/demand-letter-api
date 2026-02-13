@@ -232,14 +232,6 @@ const model = sanitize({
     guarantors: Array.isArray(data?.guarantors) && data.guarantors.length > 0 ? data.guarantors : undefined,
 });
 
-    console.log('=== DOCX RENDERING DEBUG ===');
-    console.log('loan.outstanding_balance:', data?.loan?.outstanding_balance, 'type:', typeof data?.loan?.outstanding_balance);
-    console.log('loan.arrears_amount:', data?.loan?.arrears_amount, 'type:', typeof data?.loan?.arrears_amount);
-    console.log('Full loan object:', JSON.stringify(data?.loan, null, 2));
-    console.log('After formatting:');
-    console.log('model.loan.outstanding_balance:', model?.loan?.outstanding_balance);
-    console.log('model.loan.arrears_amount:', model?.loan?.arrears_amount);
-    console.log('============================');
 
     doc.render(model);
     return doc.getZip().generate({ type: "nodebuffer" });
@@ -779,9 +771,11 @@ const filename = `${account}_${template}_${timestamp}.pdf`;
 // Mask the account number for email subject (show first and last character only)
 const maskAccountNumber = (acc) => {
   if (!acc || acc.length < 2) return acc;
-  const firstChar = acc.charAt(0);
-  const lastChar = acc.charAt(acc.length - 1);
-  const masked = 'X'.repeat(Math.max(0, acc.length - 2));
+  const str = String(acc).trim();
+  if (str.length < 2) return str;
+  const firstChar = str.charAt(0);
+  const lastChar = str.charAt(str.length - 1);
+  const masked = 'X'.repeat(Math.max(0, str.length - 2));
   return `${firstChar}${masked}${lastChar}`;
 };
 
@@ -789,147 +783,359 @@ const maskedAccount = maskAccountNumber(data?.customer?.account_number || accoun
 
 const { transport, from } = makeMailer();
 
-        
+// Read logo file for embedding
+const logoPath = path.join(__dirname, "assets", "images", "auth.jpg");
+let logoBuffer;
+try {
+    logoBuffer = await fs.readFile(logoPath);
+} catch (err) {
+    console.warn("Logo file not found at", logoPath, "- email will be sent without logo");
+}
 
-        // build a nice HTML version
-        const htmlBody = `
+// Build professional email with embedded logo
+const htmlBody = `
 <!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-      body {
+      * { 
+        box-sizing: border-box; 
         margin: 0;
         padding: 0;
-        font-family: "Segoe UI", Arial, sans-serif;
-        background-color: #f4f4f4;
-        color: #2c2c2c;
       }
-      .container {
-        max-width: 640px;
-        margin: 2rem auto;
-        background: #ffffff;
-        border-radius: 8px;
-        overflow: hidden;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-        border-top: 4px solid #ffc20e;
-      }
-      .header {
-        background-color: #e87722;
-        color: #ffffff;
-        padding: 1.25rem 1.75rem;
-        font-size: 1.25rem;
-        font-weight: 600;
-        letter-spacing: 0.3px;
-      }
-      .content {
-        padding: 1.75rem;
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: #f5f7fa;
         line-height: 1.6;
       }
+      .email-wrapper {
+        width: 100%;
+        background-color: #f5f7fa;
+        padding: 20px 10px;
+      }
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background: #ffffff;
+        overflow: hidden;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border-radius: 8px;
+      }
+      
+      /* HEADER with Logo */
+      .header {
+        background: #ffffff;
+        padding: 30px 30px 20px;
+        text-align: center;
+        border-bottom: 1px solid #e8edf2;
+      }
+      .logo-container {
+        margin: 0 auto 10px;
+        max-width: 320px;
+      }
+      .logo-container img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: 0 auto;
+      }
+      
+      /* CONTENT */
+      .content {
+        padding: 35px 30px;
+        background: #ffffff;
+      }
       .content p {
-        margin: 0.9rem 0;
+        margin: 0 0 18px 0;
+        color: #4a5568;
+        font-size: 15px;
+        line-height: 1.7;
+      }
+      .greeting {
+        font-size: 16px;
+        color: #2d3748;
+        font-weight: 500;
+      }
+      
+      /* ACCOUNT BOX */
+      .account-box {
+        background: linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%);
+        border-left: 4px solid #3949AB;
+        padding: 20px 24px;
+        margin: 26px 0;
+        border-radius: 6px;
+      }
+      .account-box p {
+        margin: 0;
+        color: #2d3748;
+      }
+      .account-label {
+        font-size: 12px;
+        color: #64748b;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 8px;
+      }
+      .account-number {
+        font-family: "SF Mono", "Monaco", "Consolas", "Courier New", monospace;
+        font-size: 20px;
+        font-weight: 700;
+        color: #3949AB;
+        letter-spacing: 1.5px;
+      }
+      
+      /* ALERT BOX */
+      .alert-box {
+        background: #fff3e0;
+        border-left: 4px solid #FFA726;
+        padding: 16px 20px;
+        margin: 22px 0;
+        border-radius: 4px;
+        font-size: 14px;
+        color: #e65100;
+      }
+      
+      /* BUTTON */
+      .btn-wrapper {
+        text-align: center;
+        margin: 30px 0;
       }
       .btn {
         display: inline-block;
-        padding: 0.6rem 1.25rem;
-        background-color: #e87722;
+        padding: 14px 32px;
+        background: #E87722;
         color: #ffffff !important;
-        border-radius: 4px;
+        border-radius: 6px;
         text-decoration: none;
         font-weight: 600;
-        margin-top: 1rem;
+        font-size: 15px;
+        box-shadow: 0 4px 12px rgba(232, 119, 34, 0.25);
+        transition: all 0.2s;
       }
+      .btn:hover {
+        background: #d66a1a;
+        box-shadow: 0 6px 16px rgba(232, 119, 34, 0.35);
+      }
+      
+      /* DIVIDER */
+      .divider {
+        height: 1px;
+        background: linear-gradient(to right, transparent, #e2e8f0, transparent);
+        margin: 30px 0;
+      }
+      
+      /* SIGNATURE */
+      .signature {
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 2px solid #f1f5f9;
+      }
+      .signature p {
+        margin: 6px 0;
+      }
+      .signature-intro {
+        color: #64748b;
+        font-size: 15px;
+        margin-bottom: 10px;
+      }
+      .dept-name {
+        color: #3949AB;
+        font-weight: 700;
+        font-size: 16px;
+      }
+      .company-name {
+        color: #64748b;
+        font-size: 14px;
+        font-style: italic;
+      }
+      
+      /* FOOTER */
       .footer {
-        background-color: #fafafa;
-        padding: 1rem 1.75rem;
-        font-size: 0.85rem;
-        color: #555555;
-        border-top: 1px solid #eee;
+        background: #f8fafc;
+        padding: 28px 30px;
+        border-top: 3px solid #FFC107;
+        font-size: 13px;
+        color: #64748b;
       }
-      a {
-        color: #e87722;
+      .footer-heading {
+        font-weight: 700;
+        color: #3949AB;
+        margin-bottom: 12px;
+        font-size: 15px;
+      }
+      .footer p {
+        margin: 8px 0;
+        line-height: 1.6;
+      }
+      .footer a {
+        color: #3949AB;
         text-decoration: none;
+        font-weight: 500;
+      }
+      .footer a:hover {
+        text-decoration: underline;
+      }
+      .footer-legal {
+        font-size: 11px;
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #e2e8f0;
+        color: #94a3b8;
+        line-height: 1.5;
+      }
+      
+      /* RESPONSIVE */
+      @media only screen and (max-width: 600px) {
+        .email-wrapper {
+          padding: 10px 5px;
+        }
+        .content {
+          padding: 25px 20px;
+        }
+        .header {
+          padding: 25px 20px 15px;
+        }
+        .logo-container {
+          max-width: 280px;
+        }
+        .account-number {
+          font-size: 17px;
+        }
+        .btn {
+          display: block;
+          padding: 12px 24px;
+        }
+        .footer {
+          padding: 22px 20px;
+        }
       }
     </style>
   </head>
   <body>
-    <div class="container">
-      <div class="header">Stima-Sacco – Demand Letter</div>
-      <div class="content">
-        <p>Dear <strong>${data?.customer?.name || "Member"}</strong>,</p>
+    <div class="email-wrapper">
+      <div class="container">
+        
+        <!-- HEADER with Logo -->
+        <div class="header">
+          <div class="logo-container">
+            ${logoBuffer ? '<img src="cid:stimalogo" alt="Stima Sacco" />' : '<div style="font-size: 28px; font-weight: 700; color: #3949AB; letter-spacing: 2px;">STIMA SACCO</div><div style="font-size: 13px; font-style: italic; color: #64748b; margin-top: 8px;">towards a prosperous future together</div>'}
+          </div>
+        </div>
+        
+        <!-- CONTENT -->
+        <div class="content">
+          <p class="greeting">Dear <strong>${data?.customer?.name || "Valued Member"}</strong>,</p>
 
-        <p>
-          We hope this message finds you well. This is a reminder that your
-          loan account <strong>${maskedAccount}</strong> 
-          is currently in arrears.
-        </p>
+          <p>
+            We hope this message finds you well. This is an important reminder regarding 
+            your loan account with Stima Sacco Kenya.
+          </p>
 
-        <p>
-          Please review the attached <strong>Demand Letter</strong> for details 
-          on your outstanding balance and repayment obligations.
-        </p>
+          <div class="account-box">
+            <div class="account-label">Your Account Number</div>
+            <div class="account-number">${maskedAccount}</div>
+          </div>
 
-        <p>
-          To avoid additional interest or penalties, kindly make payment or 
-          contact our Recoveries Team immediately for assistance.
-        </p>
+          <div class="alert-box">
+            <strong>⚠️ Action Required:</strong> Your loan account is currently in arrears. 
+            Immediate attention is needed to avoid additional penalties.
+          </div>
 
-        <p style="margin-top:1rem;">
-          <a href="mailto:recoveries@stima-sacco.com" class="btn">Contact Recoveries</a>
-        </p>
+          <p>
+            Please review the attached <strong>Demand Letter</strong> carefully. It contains 
+            complete details about your outstanding balance, payment obligations, and the 
+            steps required to regularize your account.
+          </p>
 
-        <p>
-          Thank you for being a valued member of Stima Sacco Kenya.
-          We appreciate your prompt attention to this matter.
-        </p>
+          <p>
+            We understand that financial challenges can arise. To avoid additional interest 
+            charges or legal action, we encourage you to:
+          </p>
 
-        <p>Warm regards,<br />
-        <strong>Recoveries Department</strong><br />
-        Stima Sacco Kenya</p>
-      </div>
-      <div class="footer">
-        <p>
-          This email and any attachments are confidential and intended solely 
-          for the addressed recipient. If you received this message in error, 
-          please notify us immediately and delete it.
-        </p>
-        <p>
-          Stima Sacco Kenya | P.O. Box 75629–00200 Nairobi | 
-          <a href="https://www.stima-sacco.com">www.stima-sacco.com</a>
-        </p>
+          <p style="padding-left: 20px; color: #2d3748;">
+            • Make payment immediately, or<br>
+            • Contact our Recoveries Team to discuss flexible repayment arrangements
+          </p>
+
+          <div class="btn-wrapper">
+            <a href="mailto:recoveries@stima-sacco.com" class="btn">📧 Contact Recoveries Team</a>
+          </div>
+
+          <div class="divider"></div>
+
+          <p>
+            At Stima Sacco, we value your membership and are committed to working with you 
+            towards financial stability. We appreciate your prompt attention to this matter.
+          </p>
+
+          <div class="signature">
+            <p class="signature-intro"><strong>Warm regards,</strong></p>
+            <p class="dept-name">Recoveries Department</p>
+            <p class="company-name">Stima Sacco Society Kenya Limited</p>
+          </div>
+        </div>
+        
+        <!-- FOOTER -->
+        <div class="footer">
+          <p class="footer-heading">Stima Sacco Society Kenya Limited</p>
+          <p>
+            <strong>Head Office:</strong> Stima Sacco Plaza, Kolobot Road, Off Red Hill Road<br>
+            P.O. Box 75629–00200, Nairobi, Kenya
+          </p>
+          <p>
+            <strong>Website:</strong> <a href="https://www.stima-sacco.com">www.stima-sacco.com</a><br>
+            <strong>Email:</strong> <a href="mailto:info@stima-sacco.com">info@stima-sacco.com</a><br>
+            <strong>Recoveries:</strong> <a href="mailto:recoveries@stima-sacco.com">recoveries@stima-sacco.com</a>
+          </p>
+          <p class="footer-legal">
+            <strong>CONFIDENTIALITY NOTICE:</strong> This email and any attachments are confidential 
+            and intended solely for the use of the individual or entity to whom they are addressed. 
+            If you have received this message in error, please notify the sender immediately and 
+            delete this message from your system. Unauthorized disclosure, copying, or distribution 
+            of this email is strictly prohibited.
+          </p>
+        </div>
+        
       </div>
     </div>
   </body>
 </html>
 `;
 
-console.log('=== EMAIL DEBUG ===');
-console.log('Account number:', data?.customer?.account_number);
-console.log('Account variable:', account);
-console.log('Masked account:', maskedAccount);
-console.log('Subject param:', subject);
-console.log('Final subject:', subject || `Demand Letter - ${maskedAccount}`);
-console.log('===================');
+// Build attachments array
+const attachments = [
+    {
+        filename,
+        content: pdf,
+        contentType: "application/pdf",
+    }
+];
 
-// now send using nodemailer
+// Add logo as embedded image if available
+if (logoBuffer) {
+    attachments.push({
+        filename: "stima-logo.jpg",
+        content: logoBuffer,
+        contentType: "image/jpeg",
+        cid: "stimalogo"
+    });
+}
+
+// Send email with embedded logo
 const mail = await transport.sendMail({
     from,
     to,
     cc,
     bcc,
-    subject: subject || `Demand Letter - ${maskedAccount}`,
-    text:       body ||
-                `Dear Customer,\n\nPlease find attached your demand letter for account ${account}.\n\nRegards,\nRecoveries Team`,
-            html: htmlBody,
-            attachments: [
-                {
-                    filename,
-                    content: pdf,
-                    contentType: "application/pdf",
-                },
-            ],
-        });
-
+    subject: subject || `Loan Account Notice - ${maskedAccount}`,
+    text: body ||
+          `Dear ${data?.customer?.name || "Valued Member"},\n\nYour loan account (${maskedAccount}) is currently in arrears.\n\nPlease find attached your demand letter with complete details on your outstanding balance and repayment obligations.\n\nTo avoid additional interest or penalties, kindly make payment or contact our Recoveries Team at recoveries@stima-sacco.com\n\nWarm regards,\nRecoveries Department\nStima Sacco Kenya`,
+    html: htmlBody,
+    attachments,
+});
         const saved = await saveLetterToMinioAndLog({
             template_code,
             data,
