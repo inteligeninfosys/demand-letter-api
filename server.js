@@ -555,21 +555,219 @@ async function getTemplateBuffer(code, version) {
 
 /* ---------- Routes ---------- */
 
+app.put("/demand-letters-api/templates/:code/meta", async (req, res) => {
+    try {
+        const code = safeCode(req.params.code);
+        if (!code) throw new Error("Missing template code");
+        
+        const { name, description, fields } = req.body;
+        const user = req.user?.preferred_username || req.user?.email || req.headers['x-user'] || 'system';
+
+        const pool = await getSqlPool();  // ← Use your existing function
+        const result = await pool.request()
+            .input('code', sql.NVarChar(100), code)
+            .input('name', sql.NVarChar(200), name)
+            .input('description', sql.NVarChar(500), description || null)
+            .input('fields', sql.NVarChar(sql.MAX), fields ? JSON.stringify(fields) : null)
+            .input('user', sql.NVarChar(128), user)
+            .query(`
+                UPDATE dbo.demand_letter_template
+                SET 
+                    template_name = @name,
+                    description = @description,
+                    available_fields = @fields,
+                    updated_by = @user,
+                    updated_at = GETDATE()
+                OUTPUT 
+                    INSERTED.template_name,
+                    INSERTED.description,
+                    INSERTED.available_fields,
+                    INSERTED.is_active
+                WHERE template_code = @code
+            `);
+
+        if (!result.recordset || result.recordset.length === 0) {
+            return res.status(404).json({ error: 'Template not found' });
+        }
+
+        const updated = result.recordset[0];
+        res.json({
+            ok: true,
+            code,
+            meta: {
+                name: updated.template_name,
+                description: updated.description,
+                fields: updated.available_fields ? JSON.parse(updated.available_fields) : [],
+                is_active: updated.is_active
+            }
+        });
+    } catch (e) {
+        console.error('Failed to update template metadata:', e);
+        res.status(400).json({ error: e.message || String(e) });
+    }
+});
+
+// PATCH /demand-letters-api/templates/:code/status
+// ENABLE/DISABLE: Toggle template active status
+app.patch("/demand-letters-api/templates/:code/status", async (req, res) => {
+    try {
+        const code = safeCode(req.params.code);
+        if (!code) throw new Error("Missing template code");
+
+        const { is_active } = req.body;
+        if (typeof is_active !== 'boolean') {
+            return res.status(400).json({ error: "is_active must be a boolean" });
+        }
+
+        const user = req.user?.preferred_username || req.user?.email || req.headers['x-user'] || 'system';
+
+        const pool = await getSqlPool();  // ← Use your existing function
+        const result = await pool.request()
+            .input('code', sql.NVarChar(100), code)
+            .input('is_active', sql.Bit, is_active ? 1 : 0)
+            .input('user', sql.NVarChar(128), user)
+            .query(`
+                UPDATE dbo.demand_letter_template
+                SET 
+                    is_active = @is_active,
+                    updated_by = @user,
+                    updated_at = GETDATE()
+                WHERE template_code = @code
+            `);
+
+        if (result.rowsAffected[0] === 0) {
+            return res.status(404).json({ error: 'Template not found' });
+        }
+
+        res.json({ 
+            ok: true, 
+            code, 
+            is_active
+        });
+    } catch (e) {
+        console.error('Failed to update template status:', e);
+        res.status(400).json({ error: e.message || String(e) });
+    }
+});
+
+// GET /demand-letters-api/templates/:code/:version.docx
+// DOWNLOAD: Download a specific template version
+// Enhanced version with better error handling
+app.get("/demand-letters-api/templates/:code/:version.docx", async (req, res) => {
+    try {
+        const code = safeCode(req.params.code);
+        const version = req.params.version.replace('.docx', ''); // Remove .docx if present
+        
+        const dir = path.join(TEMPLATES_DIR, code);
+        const filename = `${version}.docx`;
+        const filepath = path.join(dir, filename);
+
+        // Verify file exists
+        if (!(await exists(filepath))) {
+            return res.status(404).json({ error: "Template file not found" });
+        }
+
+        // Send file with proper headers
+        const downloadName = `${code}_${version}.docx`;
+        res.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        
+        const fileContent = await fs.readFile(filepath);
+        res.send(fileContent);
+    } catch (e) {
+        res.status(400).json({ error: e.message || String(e) });
+    }
+});
+
 // List templates
 app.get("/demand-letters-api/templates", async (_req, res) => {
-    const list = await listTemplates();
-    res.json(list);
+    try {
+        const pool = await getSqlPool();  // ← Use your existing function
+        
+        // Get metadata from database
+        const dbResult = await pool.request().query(`
+            SELECT 
+                template_code,
+                template_name,
+                description,
+                available_fields,
+                is_active
+            FROM dbo.demand_letter_template
+            ORDER BY template_name
+        `);
+
+        const dbTemplates = dbResult.recordset || [];
+        const templates = [];
+
+        // Check filesystem for versions
+        if (await exists(TEMPLATES_DIR)) {
+            const entries = await fs.readdir(TEMPLATES_DIR, { withFileTypes: true });
+            
+            for (const d of entries) {
+                if (!d.isDirectory()) continue;
+                const code = d.name;
+                const dir = path.join(TEMPLATES_DIR, code);
+                const files = await fs.readdir(dir).catch(() => []);
+                const versions = files.filter((f) => /\.docx$/i.test(f)).sort();
+                
+                // Find matching database record
+                const dbRecord = dbTemplates.find(t => t.template_code === code);
+                
+                templates.push({
+                    code,
+                    hasCurrent: versions.includes('current.docx'),
+                    versions,
+                    meta: dbRecord ? {
+                        name: dbRecord.template_name,
+                        description: dbRecord.description,
+                        fields: dbRecord.available_fields ? JSON.parse(dbRecord.available_fields) : [],
+                        is_active: dbRecord.is_active
+                    } : null
+                });
+            }
+        }
+
+        res.json(templates);
+    } catch (err) {
+        console.error('Failed to list templates:', err);
+        // Fallback to old method if database fails
+        const list = await listTemplates();
+        res.json(list);
+    }
 });
 
 // Get meta/fields for a template
 app.get("/demand-letters-api/templates/:code/meta", async (req, res) => {
     try {
         const code = safeCode(req.params.code);
-        const meta = await readMeta(code);
-        if (!meta) return res.status(404).json({ error: "No meta.json for template" });
-        res.json(meta);
+        
+        const pool = await getSqlPool();  // ← Use your existing function
+        const result = await pool.request()
+            .input('code', sql.NVarChar(100), code)
+            .query(`
+                SELECT 
+                    template_name,
+                    description,
+                    available_fields,
+                    is_active
+                FROM dbo.demand_letter_template
+                WHERE template_code = @code
+            `);
+
+        if (!result.recordset || result.recordset.length === 0) {
+            return res.status(404).json({ error: 'Template not found' });
+        }
+
+        const record = result.recordset[0];
+        res.json({
+            name: record.template_name,
+            description: record.description,
+            fields: record.available_fields ? JSON.parse(record.available_fields) : [],
+            is_active: record.is_active
+        });
     } catch (e) {
-        res.status(400).json({ error: e.message || String(e) });
+        console.error('Failed to read template metadata:', e);
+        res.status(500).json({ error: 'Failed to read template metadata' });
     }
 });
 
