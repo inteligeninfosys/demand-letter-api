@@ -18,6 +18,9 @@ import os from "os";
 import crypto from "crypto";
 import nodemailer from "nodemailer";
 import sql from "mssql";
+import { authenticate } from './auth.js';
+import { minioClient } from './middleware/minioClient.js';
+
 dayjs.extend(utc);
 const require = createRequire(import.meta.url);
 
@@ -66,16 +69,6 @@ async function readMeta(code) {
     const p = path.join(TEMPLATES_DIR, code, "meta.json");
     if (!(await exists(p))) return null;
     return JSON.parse(await fs.readFile(p, "utf8"));
-}
-
-async function resolveTemplatePathxx(code, version) {
-    const dir = path.join(TEMPLATES_DIR, safeCode(code));
-    const file = version ? `${version}.docx` : "current.docx";
-    const p = path.join(dir, file);
-    if (!(await exists(p))) {
-        throw new Error(`Template not found: ${code}/${file}`);
-    }
-    return p;
 }
 
 // Robust resolver
@@ -151,110 +144,23 @@ async function renderDocxFromTemplate(templatePath, data) {
         return v;
     }
 
-function formatCurrency(value) {
-    if (value === null || value === undefined || value === '') return '';
-    
-    // Convert to string and clean up
-    let cleaned = String(value).trim();
-    
-    // Remove any non-numeric characters except dots, minus signs, and commas
-    cleaned = cleaned.replace(/,/g, '');
-    
-    // Extract just the numeric part (including decimals and negative sign)
-    const match = cleaned.match(/^-?\d+\.?\d*/);
-    
-    if (!match) {
-        console.warn(`formatCurrency: Could not parse value: "${value}"`);
-        return '';
-    }
-    
-    const num = Number(match[0]);
-    
-    if (isNaN(num)) {
-        console.warn(`formatCurrency: NaN after parsing: "${value}"`);
-        return '';
-    }
-    
-    // Take absolute value (no negative amounts in demand letters)
-    const absNum = Math.abs(num);
-    
-    // Format with commas
-    const formatted = absNum.toLocaleString('en-US', { 
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2 
-    });
-    
-    // Return with KES prefix
-    return `KES ${formatted}`;
-}
-
-// Helper to clean and extract numeric values
-function cleanNumeric(value) {
-    if (value === null || value === undefined || value === '') return '';
-    let cleaned = String(value).trim().replace(/,/g, '');
-    const match = cleaned.match(/^-?\d+\.?\d*/);
-    return match ? match[0] : '';
-}
-
-// Helper for interest rate formatting
-function formatInterestRate(value) {
-    if (value === null || value === undefined || value === '' || value === 'xx') return '';
-    
-    const cleaned = cleanNumeric(value);
-    if (!cleaned) return '';
-    
-    const num = Number(cleaned);
-    if (isNaN(num)) return '';
-    
-    // Format as percentage (e.g., "12%" or "12.5%")
-    return `${num}%`;
-}
-
-const model = sanitize({
-    ...data,
-    customer: {
-        ...data?.customer,
-        account_number: (data?.customer?.account_number || "").toString().trim(),
-        customer_number: data?.customer?.customer_number ?? "",
-    },
-    loan: {
-        ...data?.loan,
-        days_in_arrears: data?.loan?.days_in_arrears ?? "",
-        // Format all currency fields
-        outstanding_balance: formatCurrency(data?.loan?.outstanding_balance),
-        arrears_amount: formatCurrency(data?.loan?.arrears_amount),
-        overdue_principal: formatCurrency(data?.loan?.overdue_principal),
-        overdue_interest: formatCurrency(data?.loan?.overdue_interest),
-        penalty_amount: formatCurrency(data?.loan?.penalty_amount),
-        // Format interest rate
-        interest_rate: formatInterestRate(data?.loan?.interest_rate),
-    },
-    guarantors: Array.isArray(data?.guarantors) && data.guarantors.length > 0 ? data.guarantors : undefined,
-});
-
-
-    doc.render(model);
-    return doc.getZip().generate({ type: "nodebuffer" });
-
-    const modelss = {
-        our_ref: safe(data.our_ref),
-        date: safe(data.date || dayjs().format("YYYY-MM-DD")),
+    const model = sanitize({
+        ...data,
         customer: {
-            name: data?.customer?.name,
-            account_number: safe(data?.customer?.account_number),
-            address_line_1: safe(data?.customer?.address_line_1),
-            address_line_2: safe(data?.customer?.address_line_2),
+            ...data?.customer,
+            // trim padded account numbers from core banking
+            account_number: (data?.customer?.account_number || "").toString().trim(),
+            customer_number: data?.customer?.customer_number ?? "",
         },
         loan: {
-            principal_amount: safe(data?.loan?.principal_amount),
-            arrears_amount: safe(data?.loan?.arrears_amount),
-            interest_rate: safe(data?.loan?.interest_rate),
-            number: safe(data?.loan?.number),
+            ...data?.loan,
+            // if you have numeric copies, keep them; else keep strings
+            days_in_arrears: data?.loan?.days_in_arrears ?? "",
+            outstanding_balance: data?.loan?.outstanding_balance ?? "",
         },
-        guarantors: Array.isArray(data?.guarantors)
-            ? data.guarantors.map((g) => ({ name: safe(g.name), address: safe(g.address) }))
-            : [],
-    };
+        guarantors: Array.isArray(data?.guarantors) ? data.guarantors : [],
+    });
+
 
     // Helpful diagnostics for common mistakes
     // (a) quick presence check for keys you mentioned
@@ -497,6 +403,7 @@ function makeMailer() {
     const pass = process.env.EMAIL_PASS;
     const from = process.env.EMAIL_FROM || user;
 
+
     if (!host || !user || !pass) {
         throw new Error("Email not configured: set EMAIL_HOST, EMAIL_USER, EMAIL_PASS");
     }
@@ -629,7 +536,8 @@ app.put("/demand-letters-api/templates/:code/current", async (req, res) => {
 });
 
 // Generate (DOCX/PDF) from a specific template code (+optional version)
-app.post("/demand-letters-api/letters", async (req, res) => {
+app.post("/demand-letters-api/letters", authenticate, async (req, res) => {
+
     try {
         const {
             template_code = "DL1",
@@ -664,7 +572,7 @@ app.post("/demand-letters-api/letters", async (req, res) => {
             : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
         // Who sent (from Keycloak/req header/user claim)
-        const sent_by = (req.user?.preferred_username || req.user?.email || req.headers['x-user'] || 'unknown');
+        const sent_by = (req.user?.username || req.user?.email || req.headers['x-user'] || 'unknown');
 
         // Filename for non-persist responses
         const baseName = `${account}_${template}_${timestamp}.${ext}`;
@@ -735,8 +643,217 @@ app.post("/demand-letters-api/letters/preview", async (req, res) => {
     }
 });
 
+function maskAccountNumber(accountNumber) {
+  if (!accountNumber) return '';
+
+  // Convert to string just in case
+  const str = String(accountNumber).trim();
+
+  if (str.length <= 3) return str;
+
+  // Keep first 3 characters and mask the rest with *
+  const visible = str.slice(0, 3);
+  const hidden = '*'.repeat(str.length - 3);
+
+  return visible + hidden;
+}
+
 // POST /demand-letters-api/letters/email
 // Body: { template_code, template_version?, data, to, cc?, bcc?, subject?, body? }
+app.post("/demand-letters-api/letters/emailxx", async (req, res) => {
+    try {
+        const {
+            template_code = "DL1",
+            template_version = null,
+            data = {},
+            to,
+            cc,
+            bcc,
+            subject,
+            body,
+        } = req.body || {};
+
+        // ⬇️ NEW: our_ref if absent
+        if (!data.our_ref) {
+            data.our_ref = await generateOurRef({ template_code, account_number: data?.customer?.account_number });
+        }
+
+        if (!to) return res.status(400).json({ error: "Missing 'to' email address" });
+
+        // Render DOCX -> PDF
+        const p = await resolveTemplatePath(template_code, template_version);
+        const docxBuffer = await renderDocxFromTemplate(p, data);
+        const pdf = await docxToPdfBuffer(docxBuffer);
+
+        // Build filename e.g. L0012142_demand1_YYYYMMDD_HHmmss.pdf
+        const account = (data?.customer?.account_number || "unknown").replace(/[^\w.-]+/g, "_");
+        const template = (template_code || "demand").replace(/[^\w.-]+/g, "_");
+        const timestamp = dayjs().format("YYYYMMDD_HHmmss");
+        const filename = `${account}_${template}_${timestamp}.pdf`;
+
+        const { transport, from } = makeMailer();
+
+        // build a nice HTML version
+        const htmlBody = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: "Segoe UI", Arial, sans-serif;
+        background-color: #f4f4f4;
+        color: #2c2c2c;
+      }
+      .container {
+        max-width: 640px;
+        margin: 2rem auto;
+        background: #ffffff;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+        border-top: 4px solid #ffc20e;
+      }
+      .header {
+        background-color: #e87722;
+        color: #ffffff;
+        padding: 1.25rem 1.75rem;
+        font-size: 1.25rem;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+      .content {
+        padding: 1.75rem;
+        line-height: 1.6;
+      }
+      .content p {
+        margin: 0.9rem 0;
+      }
+      .btn {
+        display: inline-block;
+        padding: 0.6rem 1.25rem;
+        background-color: #e87722;
+        color: #ffffff !important;
+        border-radius: 4px;
+        text-decoration: none;
+        font-weight: 600;
+        margin-top: 1rem;
+      }
+      .footer {
+        background-color: #fafafa;
+        padding: 1rem 1.75rem;
+        font-size: 0.85rem;
+        color: #555555;
+        border-top: 1px solid #eee;
+      }
+      a {
+        color: #e87722;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">Stima-Sacco – Demand Letter</div>
+      <div class="content">
+        <p>Dear <strong>${data?.customer?.name || "Member"}</strong>,</p>
+
+        <p>
+          We hope this message finds you well. This is a reminder that your
+          loan account <strong>${maskAccountNumber(data?.customer?.account_number) || maskAccountNumber(account)}</strong> 
+          is currently in arrears.
+        </p>
+
+        <p>
+          Please review the attached <strong>Demand Letter</strong> for details 
+          on your outstanding balance and repayment obligations.
+        </p>
+
+        <p>
+          To avoid additional interest or penalties, kindly make payment or 
+          contact our Recoveries Team immediately for assistance.
+        </p>
+
+        <p style="margin-top:1rem;">
+          <a href="mailto:recoveries@stima-sacco.com" class="btn">Contact Recoveries</a>
+        </p>
+
+        <p>
+          Thank you for being a valued member of Stima Sacco Kenya.
+          We appreciate your prompt attention to this matter.
+        </p>
+
+        <p>Warm regards,<br />
+        <strong>Recoveries Department</strong><br />
+        Stima Sacco Kenya</p>
+      </div>
+      <div class="footer">
+        <p>
+          This email and any attachments are confidential and intended solely 
+          for the addressed recipient. If you received this message in error, 
+          please notify us immediately and delete it.
+        </p>
+        <p>
+          Stima Sacco Kenya | P.O. Box 75629–00200 Nairobi | 
+          <a href="https://www.stima-sacco.com">www.stima-sacco.com</a>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>
+`;
+
+
+        // now send using nodemailer
+        const mail = await transport.sendMail({
+            from,
+            to,
+            cc,
+            bcc,
+            subject: `Demand Letter - ${maskAccountNumber(data?.customer?.account_number)}`,
+            text:
+                body ||
+                `Dear Customer,\n\nPlease find attached your demand letter for account ${data?.customer?.account_number}.\n\nRegards,\nRecoveries Team`,
+            html: htmlBody,
+            attachments: [
+                {
+                    filename,
+                    content: pdf,
+                    contentType: "application/pdf",
+                },
+            ],
+        });
+
+        const saved = await saveLetterToMinioAndLog({
+            template_code,
+            data,
+            blob: pdf,                  // you already rendered to PDF for email
+            ext: 'pdf',
+            contentType: 'application/pdf',
+            sent_by: from,
+            provider_ref: mail.messageId,
+            our_ref: data.our_ref,
+            status: "SENT",
+        });
+
+        res.json({
+            ok: true,
+            messageId: mail.messageId,
+            history_id: saved.id,
+            document_name: saved.document_name,
+            object_key: saved.key,
+            idem_key: saved.idem_key,
+            our_ref: data.our_ref,
+            url: saved.signedUrl,
+        });
+    } catch (e) {
+        console.log(e)
+        res.status(400).json({ error: e?.message || String(e) });
+    }
+});
+
 app.post("/demand-letters-api/letters/email", async (req, res) => {
     try {
         const {
@@ -1166,7 +1283,7 @@ const mail = await transport.sendMail({
 
 // GET /letters/download/:id
 // Look up history row by id, issue a presigned GET and redirect (302)
-app.get("/demand-letters-api/letters/download/:id", async (req, res) => {
+app.get("/demand-letters-apixx/letters/download/:id", async (req, res) => {
     const pool = await getSqlPool();
     const r = await pool.request()
         .input("id", sql.BigInt, Number(req.params.id))
@@ -1178,6 +1295,47 @@ app.get("/demand-letters-api/letters/download/:id", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="${row.document_name}"`);
     res.redirect(302, url);
 });
+
+app.get("/demand-letters-api/letters/download/:id", async (req, res) => {
+  const pool = await getSqlPool();
+
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).send("Invalid id");
+
+  const r = await pool.request()
+    .input("id", sql.BigInt, id)
+    .query("SELECT TOP 1 bucket, object_key, document_name FROM dbo.demand_letter_history WHERE id=@id");
+
+  const row = r.recordset?.[0];
+  if (!row) return res.status(404).send("Not found");
+
+  try {
+    // If you use minio-js client:
+    // const stream = await minioClient.getObject(row.bucket, row.object_key);
+
+    // If you wrap minio in helper, adapt accordingly:
+    const stream = await minioClient.getObject(row.bucket, row.object_key);
+
+    const filename = (row.document_name || row.object_key?.split("/").pop() || `letter_${id}`).toString();
+
+    res.setHeader("Content-Type", row.content_type || "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader("Cache-Control", "private, max-age=0, no-cache");
+
+    stream.on("error", (e) => {
+      // MinIO returns errors on stream for missing key, perms, etc.
+      console.error("minio stream error", e);
+      if (!res.headersSent) res.status(500).send("Download failed");
+      else res.end();
+    });
+
+    stream.pipe(res);
+  } catch (e) {
+    console.error("download error", e);
+    return res.status(500).send("Download failed");
+  }
+});
+
 
 // GET /demand-letters-api/letters/history?account=ACC123&page=0&pageSize=10
 app.get("/demand-letters-api/letters/history", async (req, res) => {
