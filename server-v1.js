@@ -250,7 +250,8 @@ async function saveLetterToMinioAndLog({
   our_ref,
   status = "SAVED",        // or "SENT"
 }) {
-  const traceId = crypto.randomUUID();
+  console.log("EMAIL STEP 8: saving to minio");
+
   const account = (data?.customer?.account_number || "unknown").replace(/[^\w.-]+/g, "_");
   const idem_key = generateIdemKey(template_code, account);
 
@@ -260,132 +261,37 @@ async function saveLetterToMinioAndLog({
   const document_name = `${account}_${tmpl}_${tsName}.${ext}`;
   const object_key = `letters/${tmpl}/${ts}/${document_name}`;
 
-  console.log("[saveLetterToMinioAndLog] STEP 1 start", {
-    traceId,
-    template_code,
-    account,
-    ext,
-    contentType,
-    status,
-    hasBlob: !!blob,
-    blobLength: Buffer.isBuffer(blob) ? blob.length : null,
+  // 1) Upload to MinIO
+  const { bucket, key } = await uploadToS3({ key: object_key, body: blob, contentType });
+
+  // 2) (Optional) Pre-sign a GET URL for quick UI open
+  const signedUrl = await presignGet({ bucket, key, expiresInSec: process.env.S3_SIGN_URL_EXP_SECONDS });
+  const signedUrlExpiryUtc = dayjs().add(Number(process.env.S3_SIGN_URL_EXP_SECONDS || 3600), "second")
+    .toDate();
+
+  // 3) Insert history row
+  console.log("EMAIL STEP 8-a: saving to db");
+  const id = await insertHistory({
+    account_number: data?.customer?.account_number || null,
+    customer_number: data?.customer?.customer_number || null,
+    demand_type: template_code,
+    date_sent: new Date(),
+    days_in_arrears: data?.loan?.days_in_arrears ?? null,
+    outstanding_balance: (data?.loan?.outstanding_balance ?? null), // numeric if you have it
+    arrears_amount: (data?.loan?.arrears_amount ?? null),
+    sent_by,
     document_name,
-    object_key,
+    bucket,
+    object_key: key,
+    provider_ref: provider_ref,
+    our_ref,
+    status,
+    signed_url_expiry_utc: signedUrlExpiryUtc,
+    idem_key,
   });
 
-  let bucket;
-  let key;
-  try {
-    console.log("[saveLetterToMinioAndLog] STEP 2 uploadToS3 begin", { traceId, object_key });
-    const uploaded = await uploadToS3({ key: object_key, body: blob, contentType });
-    bucket = uploaded?.bucket;
-    key = uploaded?.key;
-    console.log("[saveLetterToMinioAndLog] STEP 3 uploadToS3 success", { traceId, bucket, key });
-  } catch (e) {
-    console.error("[saveLetterToMinioAndLog] STEP 3 uploadToS3 failed", {
-      traceId,
-      message: e?.message,
-      name: e?.name,
-      code: e?.code,
-      statusCode: e?.statusCode,
-      stack: e?.stack,
-      bucket: process.env.S3_BUCKET || null,
-      endpoint: process.env.S3_ENDPOINT || null,
-      object_key,
-    });
-    throw e;
-  }
+  console.log("EMAIL STEP 8-c: saved to db");
 
-  let signedUrl;
-  let signedUrlExpiryUtc;
-  try {
-    console.log("[saveLetterToMinioAndLog] STEP 4 presignGet begin", { traceId, bucket, key });
-    signedUrl = await presignGet({ bucket, key, expiresInSec: process.env.S3_SIGN_URL_EXP_SECONDS });
-    signedUrlExpiryUtc = dayjs().add(Number(process.env.S3_SIGN_URL_EXP_SECONDS || 3600), "second")
-      .toDate();
-    console.log("[saveLetterToMinioAndLog] STEP 5 presignGet success", {
-      traceId,
-      bucket,
-      key,
-      signedUrlExpiryUtc,
-      hasSignedUrl: !!signedUrl,
-    });
-  } catch (e) {
-    console.error("[saveLetterToMinioAndLog] STEP 5 presignGet failed", {
-      traceId,
-      message: e?.message,
-      name: e?.name,
-      code: e?.code,
-      statusCode: e?.statusCode,
-      stack: e?.stack,
-      bucket,
-      key,
-    });
-    throw e;
-  }
-
-  let id;
-  try {
-    console.log("[saveLetterToMinioAndLog] STEP 6 insertHistory begin", {
-      traceId,
-      account_number: data?.customer?.account_number || null,
-      customer_number: data?.customer?.customer_number || null,
-      demand_type: template_code,
-      document_name,
-      bucket,
-      key,
-      provider_ref,
-      our_ref,
-      status,
-      idem_key,
-    });
-
-    id = await insertHistory({
-      account_number: data?.customer?.account_number || null,
-      customer_number: data?.customer?.customer_number || null,
-      demand_type: template_code,
-      date_sent: new Date(),
-      days_in_arrears: data?.loan?.days_in_arrears ?? null,
-      outstanding_balance: (data?.loan?.outstanding_balance ?? null), // numeric if you have it
-      arrears_amount: (data?.loan?.arrears_amount ?? null),
-      sent_by,
-      document_name,
-      bucket,
-      object_key: key,
-      provider_ref: provider_ref,
-      our_ref,
-      status,
-      signed_url_expiry_utc: signedUrlExpiryUtc,
-      idem_key,
-    });
-
-    console.log("[saveLetterToMinioAndLog] STEP 7 insertHistory success", { traceId, id, bucket, key });
-  } catch (e) {
-    console.error("[saveLetterToMinioAndLog] STEP 7 insertHistory failed", {
-      traceId,
-      message: e?.message,
-      name: e?.name,
-      code: e?.code,
-      number: e?.number,
-      state: e?.state,
-      class: e?.class,
-      lineNumber: e?.lineNumber,
-      serverName: e?.serverName,
-      procName: e?.procName,
-      stack: e?.stack,
-      account_number: data?.customer?.account_number || null,
-      customer_number: data?.customer?.customer_number || null,
-      document_name,
-      bucket,
-      key,
-      provider_ref,
-      our_ref,
-      status,
-    });
-    throw e;
-  }
-
-  console.log("[saveLetterToMinioAndLog] STEP 8 done", { traceId, id, bucket, key, document_name });
   return { id, bucket, key, document_name, signedUrl, signedUrlExpiryUtc };
 }
 
@@ -412,6 +318,7 @@ async function insertHistory({
   days_in_arrears, outstanding_balance, arrears_amount, sent_by,
   document_name, bucket, object_key, provider_ref, our_ref, status, signed_url_expiry_utc, idem_key
 }) {
+  console.log("EMAIL STEP 8-b: saving to db");
   const pool = await getSqlPool();
   const r = await pool.request()
     .input("account_number", sql.NVarChar(100), account_number)
@@ -906,19 +813,9 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
     return res.send(blob);
 
   } catch (err) {
-    console.log('LETTERS_ROUTE_ERROR', {
-      message: err?.message,
-      name: err?.name,
-      code: err?.code,
-      stack: err?.stack,
-    });
+    console.log(err)
     //res.status(400).json({ error: err?.message || String(err) });
-    req.log.error('account info error', {
-      error: err?.message,
-      name: err?.name,
-      code: err?.code,
-      stack: err?.stack,
-    });
+    req.log.error('account info error', { error: err.message }, req);
     next(err);
   }
 });
@@ -973,14 +870,8 @@ function maskAccountNumber(accountNumber) {
 // POST /demand-letters-api/letters/email
 // Body: { template_code, template_version?, data, to, cc?, bcc?, subject?, body? }
 app.post("/demand-letters-api/letters/email", async (req, res) => {
-  const traceId = req.headers['x-request-id'] || req.id || randomUUID();
-  const logStep = (step, extra = {}) => {
-    console.log(`[letters/email][${traceId}] ${step}`, extra);
-  };
-
+  console.log("EMAIL STEP 1: request accepted");
   try {
-    logStep('STEP 1 - request accepted');
-
     const {
       template_code = "DL1",
       template_version = null,
@@ -992,55 +883,29 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
       body,
     } = req.body || {};
 
-    logStep('STEP 2 - payload parsed', {
-      template_code,
-      template_version,
-      to,
-      has_cc: !!cc,
-      has_bcc: !!bcc,
-      has_subject: !!subject,
-      account_number: data?.customer?.account_number || null,
-      customer_number: data?.customer?.customer_number || null,
-      provider_ref: req.body?.provider_ref || null,
-    });
-
     // ⬇️ NEW: our_ref if absent
     if (!data.our_ref) {
-      logStep('STEP 3 - generating our_ref');
       data.our_ref = await generateOurRef({ template_code, account_number: data?.customer?.account_number });
-      logStep('STEP 4 - our_ref generated', { our_ref: data.our_ref });
-    } else {
-      logStep('STEP 4 - existing our_ref detected', { our_ref: data.our_ref });
     }
 
-    if (!to) {
-      logStep('STEP 5 - validation failed', { error: "Missing 'to' email address" });
-      return res.status(400).json({ error: "Missing 'to' email address" });
-    }
+    if (!to) return res.status(400).json({ error: "Missing 'to' email address" });
 
     // Render DOCX -> PDF
-    logStep('STEP 6 - resolving template path');
     const p = await resolveTemplatePath(template_code, template_version);
-    logStep('STEP 7 - template path resolved', { template_path: p });
-
-    logStep('STEP 8 - rendering DOCX');
     const docxBuffer = await renderDocxFromTemplate(p, data);
-    logStep('STEP 9 - DOCX rendered', { docx_size: docxBuffer?.length || 0 });
+    console.log("EMAIL STEP 3: docx rendered");
 
-    logStep('STEP 10 - converting DOCX to PDF');
     const pdf = await docxToPdfBuffer(docxBuffer);
-    logStep('STEP 11 - PDF rendered', { pdf_size: pdf?.length || 0 });
+    console.log("EMAIL STEP 4: pdf rendered");
 
     // Build filename e.g. L0012142_demand1_YYYYMMDD_HHmmss.pdf
     const account = (data?.customer?.account_number || "unknown").replace(/[^\w.-]+/g, "_");
     const template = (template_code || "demand").replace(/[^\w.-]+/g, "_");
     const timestamp = dayjs().format("YYYYMMDD_HHmmss");
     const filename = `${account}_${template}_${timestamp}.pdf`;
-    logStep('STEP 12 - filename built', { filename });
 
-    logStep('STEP 13 - creating mail transport');
     const { transport, from } = makeMailer();
-    logStep('STEP 14 - mail transport created', { from });
+    console.log("EMAIL STEP 5: mailer created");
 
     // build a nice HTML version
     const htmlBody = `
@@ -1156,26 +1021,16 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 
 
     // now send using nodemailer
-    logStep('STEP 15 - sending email', {
-      to,
-      has_attachment: true,
-      attachment_name: filename,
-      attachment_size: pdf?.length || 0,
-    });
+    console.log("EMAIL STEP 6: sending mail");
     const mail = await transport.sendMail({
       from,
       to,
       cc,
       bcc,
-      subject: subject || `Demand Letter - ${maskAccountNumber(data?.customer?.account_number)}`,
+      subject: `Demand Letter - ${maskAccountNumber(data?.customer?.account_number)}`,
       text:
         body ||
-        `Dear Customer,
-
-Please find attached your demand letter for account ${data?.customer?.account_number}.
-
-Regards,
-Recoveries Team`,
+        `Dear Customer,\n\nPlease find attached your demand letter for account ${data?.customer?.account_number}.\n\nRegards,\nRecoveries Team`,
       html: htmlBody,
       attachments: [
         {
@@ -1185,14 +1040,9 @@ Recoveries Team`,
         },
       ],
     });
-    logStep('STEP 16 - email sent', {
-      messageId: mail?.messageId || null,
-      accepted: mail?.accepted || [],
-      rejected: mail?.rejected || [],
-      response: mail?.response || null,
-    });
 
-    logStep('STEP 17 - saving letter to MinIO/history');
+    console.log("EMAIL STEP 7: mail sent", mail?.messageId);
+
     const saved = await saveLetterToMinioAndLog({
       template_code,
       data,
@@ -1204,13 +1054,9 @@ Recoveries Team`,
       our_ref: data.our_ref,
       status: "SENT",
     });
-    logStep('STEP 18 - saved letter to MinIO/history', {
-      history_id: saved?.id || null,
-      object_key: saved?.key || null,
-      document_name: saved?.document_name || null,
-    });
 
-    logStep('STEP 19 - sending API response');
+    console.log("EMAIL STEP 9: saved to minio/db");
+
     res.json({
       ok: true,
       messageId: mail.messageId,
@@ -1221,24 +1067,22 @@ Recoveries Team`,
       our_ref: data.our_ref,
       url: saved.signedUrl,
     });
-    logStep('STEP 20 - API response sent');
   } catch (e) {
-    console.log(`[letters/email][${traceId}] ERROR`, {
+    console.error("EMAIL_ROUTE_ERROR", {
       message: e?.message,
       name: e?.name,
       code: e?.code,
       command: e?.command,
-      responseCode: e?.responseCode,
       response: e?.response,
+      responseCode: e?.responseCode,
+      statusCode: e?.statusCode,
       stack: e?.stack,
     });
-    res.status(400).json({
+
+    return res.status(500).json({
       ok: false,
-      error: e?.message || String(e),
-      traceId,
+      error: e?.message || "Failed to email demand letter",
       code: e?.code || null,
-      command: e?.command || null,
-      responseCode: e?.responseCode || null,
     });
   }
 });
@@ -1269,10 +1113,6 @@ app.get("/demand-letters-api/templates/:code/:version.docx", async (req, res) =>
     const dir = path.join(TEMPLATES_DIR, code);
     const filename = `${version}.docx`;
     const filepath = path.join(dir, filename);
-
-    console.log('dir:::' + dir);
-    console.log('filename:::' + filename);
-    console.log('filepath:::' + filepath);
 
     // Verify file exists
     if (!(await exists(filepath))) {
