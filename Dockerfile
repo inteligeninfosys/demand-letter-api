@@ -41,9 +41,8 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 
 CMD ["node", "server.js"]
 
-# docker build -t docker.io/inteligeninfosys/demand-letters-api-kb:202603191205 .
-# docker push docker.io/inteligeninfosys/demand-letters-api-kb:202603191205
-# podman pull docker.io/inteligeninfosys/demand-letters-api-kb:202603191205
-# podman tag docker.io/inteligeninfosys/demand-letters-api-kb:202603191205 10.0.1.188:32000/demand-letters-api-kb:202603191205
-# podman push --tls-verify=false 10.0.1.188:32000/demand-letters-api-kb:202603191205
+# docker build -t docker.io/inteligeninfosys/demand-letters-api-kb:202604021017 .
+# docker push docker.io/inteligeninfosys/demand-letters-api-kb:202604021017
+# skopeo copy docker://docker.io/inteligeninfosys/demand-letters-api-kb:202604021017 docker://10.0.1.188:32000/demand-letters-api-kb:202604021017 --dest-tls-verify=false 
+
 
