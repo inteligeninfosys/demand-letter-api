@@ -1167,19 +1167,6 @@ app.post("/demand-letters-api/letters/email", async (req, res) => {
 });
 
 // GET /letters/download/:id
-// Look up history row by id, issue a presigned GET and redirect (302)
-app.get("/demand-letters-apixx/letters/download/:id", async (req, res) => {
-  const pool = await getSqlPool();
-  const r = await pool.request()
-    .input("id", sql.BigInt, Number(req.params.id))
-    .query("SELECT TOP 1 bucket, object_key, document_name FROM dbo.demand_letter_history WHERE id=@id");
-  const row = r.recordset?.[0];
-  if (!row) return res.status(404).send("Not found");
-
-  const url = await presignGet({ bucket: row.bucket, key: row.object_key });
-  res.setHeader("Content-Disposition", `attachment; filename="${row.document_name}"`);
-  res.redirect(302, url);
-});
 
 app.get("/demand-letters-api/letters/download/:id", async (req, res) => {
   const pool = await getSqlPool();
