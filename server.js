@@ -346,7 +346,7 @@ async function saveLetterToMinioAndLog({
       demand_type: template_code,
       date_sent: new Date(),
       days_in_arrears: data?.loan?.days_in_arrears ?? null,
-      outstanding_balance: (data?.loan?.outstanding_balance ?? null), // numeric if you have it
+      outstanding_balance: (data?.loan?.outstanding_balance ?? null),
       arrears_amount: (data?.loan?.arrears_amount ?? null),
       sent_by,
       document_name,
@@ -572,16 +572,11 @@ async function getTemplateBuffer(code, version) {
 
 /* ---------- Routes ---------- */
 
-// List templates
-app.get("/demand-letters-apixx/templates", async (_req, res) => {
-  const list = await listTemplates();
-  res.json(list);
-});
 
 // List templates
 app.get("/demand-letters-api/templates", async (_req, res) => {
   try {
-    const pool = await getSqlPool();  // ← Use your existing function
+    const pool = await getSqlPool(); 
 
     // Get metadata from database
     const dbResult = await pool.request().query(`
@@ -597,6 +592,8 @@ app.get("/demand-letters-api/templates", async (_req, res) => {
 
     const dbTemplates = dbResult.recordset || [];
     const templates = [];
+
+    console.log(dbTemplates)
 
     // Check filesystem for versions
     if (await exists(TEMPLATES_DIR)) {
