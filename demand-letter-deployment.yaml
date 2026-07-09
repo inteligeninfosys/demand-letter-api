@@ -104,25 +104,3 @@ spec:
     - name: http
       port: 8004
       targetPort: http
----
-kind: Ingress
-metadata:
-  name: demand-letter-ingress
-  namespace: ecol-kb
-spec:
-  ingressClassName: nginx
-  rules:
-  - host: demands.kingdombankltd.co.ke
-    http:
-      paths:
-      - backend:
-          service:
-            name: demand-api-svc
-            port:
-              number: 8004
-        path: /
-        pathType: Prefix
-  tls:
-  - hosts:
-    - demands.kingdombankltd.co.ke
-    secretName: kingdombankltd-tls
