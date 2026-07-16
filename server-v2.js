@@ -47,13 +47,13 @@ getLogger({
 // attach logging middleware here so every request has req.log
 app.use(requestLoggingMiddleware());
 
-const TEMPLATES_DIR = path.resolve(process.env.TEMPLATE_DIR || path.join(__dirname, "templates"));
+const TEMPLATES_DIR = path.join(__dirname, "templates");
 const upload = multer({ storage: multer.memoryStorage() });
 
 /* ---------- Helpers ---------- */
 
 const execFileAsync = promisify(execFile);
-const safeCode = (s) => String(s || "").trim().replace(/[^a-zA-Z0-9_\-]/g, "");
+const safeCode = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9_\-]/g, "");
 async function exists(p) { try { await fs.access(p); return true; } catch { return false; } }
 
 async function listTemplates() {
@@ -86,15 +86,9 @@ async function readMeta(code) {
 async function resolveTemplatePath(template_code, template_version = null) {
   if (!template_code) throw new Error("template_code is required");
 
-  // 1) sanitize path segments to prevent directory traversal
+  // 1) sanitize inputs (trim spaces, normalize)
   const code = String(template_code).trim();                // e.g. 'DL1'
   const verIn = (template_version ?? "current").toString().trim();
-  if (!/^[a-zA-Z0-9_-]+$/.test(code)) {
-    throw new Error("Invalid template_code");
-  }
-  if (!/^[a-zA-Z0-9_.-]+$/.test(verIn) || verIn.includes("..")) {
-    throw new Error("Invalid template_version");
-  }
 
   // If caller passed a full filename like "current.docx" or "DL1_v2.docx", use it as-is
   const isFileName = /\.(docx)$/i.test(verIn);
@@ -102,10 +96,11 @@ async function resolveTemplatePath(template_code, template_version = null) {
 
   // 2) candidate roots (absolute!)
   const roots = [
-    TEMPLATES_DIR,                                    // env TEMPLATE_DIR or ./templates
-    "/app/templates",                               // default in your image
-    "/data/templates",                              // optional external mount
-  ].filter((value, index, all) => value && all.indexOf(value) === index);
+    process.env.TEMPLATE_DIR,                          // prefer explicit env
+    path.join(__dirname, "templates"),                // ./templates next to server.js
+    "/app/templates",                                 // default in your image
+    "/data/templates",                                // optional external mount
+  ].filter(Boolean);
 
   // 3) build candidates
   const tried = [];
@@ -144,7 +139,7 @@ async function renderDocxFromTemplate(templatePath, data) {
     paragraphLoop: true,
     linebreaks: true,
     //delimiters: { start: "[[", end: "]]" }, // matches your templates
-    nullGetter: () => "",                       // return empty string for missing values
+    //nullGetter: () => "",                      // return empty string for missing values
   });
 
   const safe = (v) => (v === null || v === undefined ? "" : v);
@@ -412,13 +407,6 @@ async function getSqlPool() {
   }).connect();
   return _sqlPool;
 }
-function toDecimalOrNull(value) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  const parsed = Number(String(value).replace(/,/g, "").replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 async function insertHistory({
   account_number, customer_number, demand_type, date_sent,
   days_in_arrears, outstanding_balance, arrears_amount, sent_by,
@@ -431,8 +419,8 @@ async function insertHistory({
     .input("demand_type", sql.NVarChar(50), demand_type)
     .input("date_sent", sql.DateTime2(0), date_sent)
     .input("days_in_arrears", sql.Int, days_in_arrears ?? null)
-    .input("outstanding_balance", sql.Decimal(18, 2), toDecimalOrNull(outstanding_balance))
-    .input("arrears_amount", sql.Decimal(18, 2), toDecimalOrNull(arrears_amount))
+    .input("outstanding_balance", sql.Decimal(18, 2), outstanding_balance ?? null)
+    .input("arrears_amount", sql.Decimal(18, 2), arrears_amount ?? null)
     .input("sent_by", sql.NVarChar(128), sent_by || null)
     .input("document_name", sql.NVarChar(260), document_name)
     .input("bucket", sql.NVarChar(128), bucket)
@@ -568,185 +556,6 @@ async function generateOurRef({ template_code, account_number }) {
   }
 
   return `${prefix}/${tmpl}/${yyyy}/${seq}`; // e.g. KB/REC/DEMAND1/2025/100321
-}
-
-
-/* ---------- Repossession order helpers ---------- */
-
-function ordinalDay(day) {
-  const n = Number(day);
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 13) return `${n}TH`;
-  switch (n % 10) {
-    case 1: return `${n}ST`;
-    case 2: return `${n}ND`;
-    case 3: return `${n}RD`;
-    default: return `${n}TH`;
-  }
-}
-
-function formatRepossessionDate(value = null) {
-  if (typeof value === "string") {
-    const text = value.trim();
-    if (/^[A-Za-z]+\s+\d{1,2}(?:ST|ND|RD|TH)\s+[A-Za-z]+\s+\d{4}$/i.test(text)) {
-      return text.toUpperCase();
-    }
-  }
-
-  const d = value ? dayjs(value) : dayjs();
-  if (!d.isValid()) throw new Error("Invalid repossession order date");
-  return `${d.format("dddd")} ${ordinalDay(d.date())} ${d.format("MMMM YYYY")}`.toUpperCase();
-}
-
-function formatMoney(value) {
-  if (value === null || value === undefined || value === "") return "";
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Intl.NumberFormat("en-KE", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  }
-
-  const text = String(value).trim();
-  const parsed = Number(text.replace(/,/g, ""));
-  if (Number.isFinite(parsed)) {
-    return new Intl.NumberFormat("en-KE", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(parsed);
-  }
-  return text;
-}
-
-function formatInterestRate(value) {
-  if (value === null || value === undefined || value === "") return "";
-  const text = String(value).trim();
-  return text.endsWith("%") ? text : `${text}%`;
-}
-
-function numberToWordsUnder100(value) {
-  const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > 99) return String(value || "").toUpperCase();
-  const ones = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", "SEVENTEEN", "EIGHTEEN", "NINETEEN"];
-  const tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"];
-  if (n < 20) return ones[n];
-  const t = Math.floor(n / 10);
-  const o = n % 10;
-  return o ? `${tens[t]}-${ones[o]}` : tens[t];
-}
-
-function actorFromRequest(req) {
-  const value =
-    req.user?.preferred_username ||
-    req.user?.username ||
-    req.user?.email ||
-    req.headers["x-user"] ||
-    "unknown";
-  return typeof value === "string" ? value : String(value?.name || value?.username || "unknown");
-}
-
-function buildRepossessionModel(input = {}) {
-  const data = input && typeof input === "object" ? input : {};
-  const validityDays = Number(data?.repossession?.validity_days ?? 30);
-
-  return {
-    ...data,
-    date: data.date || formatRepossessionDate(),
-    bank: {
-      name: "KINGDOM BANK LIMITED",
-      address_line_1: "Kingdom Bank Towers, Argwings Kodhek Rd, Kilimani",
-      address_line_2: "P. O. Box 22741-00100",
-      town: "Nairobi",
-      ...(data.bank || {}),
-    },
-    auctioneer: {
-      name: "",
-      address_line_1: "",
-      address_line_2: "",
-      town: "",
-      contact_person: "",
-      ...(data.auctioneer || {}),
-    },
-    customer: {
-      account_number: "",
-      customer_number: "",
-      name: "",
-      address_line_1: "",
-      address_line_2: "",
-      town: "",
-      phone: "",
-      ...(data.customer || {}),
-    },
-    collateral: {
-      physical_address: "",
-      legal_description: "",
-      ...(data.collateral || {}),
-    },
-    loan: {
-      ...(data.loan || {}),
-      outstanding_balance: formatMoney(data?.loan?.outstanding_balance),
-      interest_rate: formatInterestRate(data?.loan?.interest_rate),
-    },
-    repossession: {
-      statutory_provision: "Movable Property Security Rights Act",
-      legal_costs: "T.B.A",
-      auctioneer_fees: "AUCTIONEERS SCALE",
-      reserve_price: "",
-      advertising_instructions: "To be assessed",
-      validity_days: validityDays,
-      validity_days_words:
-        data?.repossession?.validity_days_words || numberToWordsUnder100(validityDays),
-      ...(data.repossession || {}),
-    },
-    signatory_1: {
-      name: "Samuel Murimi",
-      title: "Debt Recovery Manager",
-      ...(data.signatory_1 || {}),
-    },
-    signatory_2: {
-      name: "Josphat Thiaine",
-      title: "Head of Credit",
-      ...(data.signatory_2 || {}),
-    },
-  };
-}
-
-function validateRepossessionModel(data) {
-  const required = [
-    ["customer.account_number", data?.customer?.account_number],
-    ["customer.name", data?.customer?.name],
-    ["auctioneer.name", data?.auctioneer?.name],
-    ["collateral.legal_description", data?.collateral?.legal_description],
-    ["loan.outstanding_balance", data?.loan?.outstanding_balance],
-  ];
-
-  const missing = required
-    .filter(([, value]) => value === null || value === undefined || String(value).trim() === "")
-    .map(([field]) => field);
-
-  if (missing.length) {
-    const error = new Error(`Missing required repossession fields: ${missing.join(", ")}`);
-    error.status = 400;
-    throw error;
-  }
-}
-
-async function generateRepossessionOurRef() {
-  const prefix = (process.env.REPO_REF_PREFIX || "KB/DRU_MM").trim().replace(/\/+$/, "");
-  const month = dayjs().utc().format("M");
-  const year = dayjs().utc().format("YYYY");
-
-  let seq = null;
-  try {
-    const pool = await getSqlPool();
-    const r = await pool.request().query("SELECT NEXT VALUE FOR dbo.seq_demand_ref AS seq");
-    seq = r?.recordset?.[0]?.seq;
-  } catch {
-    // Sequence may not exist in a fresh environment; use a unique time-based suffix.
-  }
-
-  const suffix = seq || `${dayjs().utc().format("YYYYMMDDHHmmss")}${Math.floor(Math.random() * 90 + 10)}`;
-  return `${prefix}/${month}/${year}/${suffix}`;
 }
 
 /* ---------- Tiny cache (per code+version) ---------- */
@@ -1111,88 +920,6 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
   }
 });
 
-
-// POST /demand-letters-api/repossession-orders
-// Generates a repossession instruction from templates/REPO/current.docx.
-// Body: { template_version?, format: "docx"|"pdf", sendoption: "PREVIEW"|"PRINT", data: {...} }
-app.post("/demand-letters-api/repossession-orders", authenticate, async (req, res, next) => {
-  try {
-    const {
-      template_version = null,
-      format = "pdf",
-      sendoption = "PREVIEW",
-      data = {},
-      provider_ref = null,
-    } = req.body || {};
-
-    const normalizedFormat = String(format).trim().toLowerCase();
-    if (!["docx", "pdf"].includes(normalizedFormat)) {
-      return res.status(400).json({ error: "format must be either 'docx' or 'pdf'" });
-    }
-
-    const normalizedSendOption = String(sendoption).trim().toUpperCase();
-    if (!["PREVIEW", "PRINT"].includes(normalizedSendOption)) {
-      return res.status(400).json({ error: "sendoption must be either 'PREVIEW' or 'PRINT'" });
-    }
-
-    const model = buildRepossessionModel(data);
-    validateRepossessionModel(model);
-
-    if (!model.our_ref) {
-      model.our_ref = await generateRepossessionOurRef();
-    }
-    if (data.date) {
-      model.date = formatRepossessionDate(data.date);
-    }
-
-    const templateCode = "REPO";
-    const templatePath = await resolveTemplatePath(templateCode, template_version);
-    const docxBuffer = await renderDocxFromTemplate(templatePath, model);
-    const isPdf = normalizedFormat === "pdf";
-    const blob = isPdf ? await docxToPdfBuffer(docxBuffer) : docxBuffer;
-    const ext = isPdf ? "pdf" : "docx";
-    const contentType = isPdf
-      ? "application/pdf"
-      : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-
-    const account = String(model.customer.account_number).replace(/[^\w.-]+/g, "_");
-    const timestamp = dayjs().format("YYYYMMDD_HHmmss");
-    const baseName = `${account}_REPO_${timestamp}.${ext}`;
-
-    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Type, Content-Length, X-Our-Ref");
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("X-Our-Ref", model.our_ref);
-
-    if (normalizedSendOption === "PRINT") {
-      const saved = await saveLetterToMinioAndLog({
-        template_code: templateCode,
-        data: model,
-        blob,
-        ext,
-        contentType,
-        sent_by: actorFromRequest(req),
-        provider_ref,
-        our_ref: model.our_ref,
-        status: "SAVED",
-      });
-
-      res.setHeader("Content-Disposition", `attachment; filename="${saved.document_name}"`);
-      return res.send(blob);
-    }
-
-    res.setHeader("Content-Disposition", `attachment; filename="${baseName}"`);
-    return res.send(blob);
-  } catch (err) {
-    req.log?.error?.("repossession order generation failed", {
-      error: err?.message,
-      name: err?.name,
-      code: err?.code,
-      stack: err?.stack,
-    });
-    return next(err);
-  }
-});
-
 // POST /letters/preview
 // Body: { template_code, template_version?, data, kind: "pdf"|"png", page?, dpi? }
 app.post("/demand-letters-api/letters/preview", async (req, res) => {
@@ -1243,7 +970,7 @@ function maskAccountNumber(accountNumber) {
 // POST /demand-letters-api/letters/email
 // Body: { template_code, template_version?, data, to, cc?, bcc?, subject?, body? }
 app.post("/demand-letters-api/letters/email", async (req, res) => {
-  const traceId = req.headers['x-request-id'] || req.id || crypto.randomUUID();
+  const traceId = req.headers['x-request-id'] || req.id || randomUUID();
   const logStep = (step, extra = {}) => {
     console.log(`[letters/email][${traceId}] ${step}`, extra);
   };
