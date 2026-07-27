@@ -9,6 +9,8 @@ const minioClient = new Client({
   secretKey: process.env.MINIO_SECRET_KEY,
 });
 
+export const RECOVERY_BUCKET =
+  process.env.MINIO_RECOVERY_BUCKET || 'recovery-docs';
 
 export async function ensureBucket() {
   const exists = await minioClient.bucketExists(RECOVERY_BUCKET).catch(() => false);

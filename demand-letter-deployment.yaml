@@ -1,9 +1,8 @@
----
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ecol-config
-  namespace: ecol
+  name: demand-letter-api-config
+  namespace: ecol-kb
 data:
   NODE_ENV: "production"
   TZ: "Africa/Nairobi"
@@ -22,14 +21,22 @@ data:
   MSSQL_USER: "sa"
   MSSQL_ENCRYPT: 'false'
   MSSQL_TRUST_SERVER_CERTIFICATE: 'true'
-  OUR_REF_PREFIX: "STIMA/REC"
+  OUR_REF_PREFIX: "KB/REC"
   S3_ENDPOINT: "http://minio-svc.ecol.svc.cluster.local:9000"
-  S3_BUCKET: "ecol-demand-letters"
+  S3_BUCKET: "demand-letters"
   S3_ACCESS_KEY: minioadmin
   S3_SECRET_KEY: minioadmin123
   S3_FORCE_PATH_STYLE: 'true'
   S3_SIGN_URL_EXP_SECONDS: '3600'
   S3_REGION: us-east-1
+  TEMPLATE_DIR: /app/templates
+
+  KEYCLOAK_ISSUER: http://localhost:8080/realms/kingdom_bank
+  KEYCLOAK_AUDIENCE: account
+  KEYCLOAK_JWKS_URL: http://localhost:8080/realms/kingdom_bank/protocol/openid-connect/certs
+
+  RABBITMQ_URL: amqp://guest:guest@localhost:5672
+  LOG_QUEUE: ecol.logs.backend.es
 ---
 apiVersion: v1
 kind: Secret
@@ -38,8 +45,8 @@ metadata:
   namespace: ecol-kb
 type: Opaque
 stringData:
-  MSSQL_PASSWORD: "3.Cxxxxxxxxxxxxx"
-  EMAIL_PASS: "$!M@jxxxxxxxxxxxxxxxxxxx"
+  MSSQL_PASSWORD: "3.Collect"
+  EMAIL_PASS: "daddym@123A"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -72,7 +79,7 @@ spec:
               name: http
           envFrom:
             - configMapRef:
-                name: ecol-config
+                name: demand-letter-api-config
             - secretRef:
                 name: ecol-secret
           volumeMounts:
