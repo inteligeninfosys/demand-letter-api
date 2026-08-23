@@ -13,19 +13,15 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.922.0",
     "@aws-sdk/s3-request-presigner": "^3.922.0",
-    "amqplib": "^0.10.9",
     "cors": "^2.8.5",
     "dayjs": "^1.11.19",
     "docxtemplater": "^3.67.3",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "fs-extra": "^11.3.2",
-    "jose": "^6.1.1",
-    "minio": "^8.0.7",
     "mssql": "^12.1.0",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.10",
-    "pizzip": "^3.2.0",
-    "username": "^7.0.0"
+    "pizzip": "^3.2.0"
   }
 }
