@@ -547,10 +547,14 @@ function generateIdemKey(template_code, account_number) {
 }
 
 // If the sequence exists, we’ll use it; else fallback to time+random (still unique).
-async function generateOurRef({ template_code, account_number }) {
+async function generateOurRef({ template_code, account_number, customer_number }) {
   const prefix = (process.env.OUR_REF_PREFIX || "KB/REC").trim();
   const tmpl = (template_code || "DEMAND").toUpperCase().replace(/[^\w/-]+/g, "");
   const yyyy = dayjs().utc().format("YYYY");
+
+  // For DL1, append the customer_number as the final ref segment.
+  const custSuffix =
+    tmpl === "DL1" && customer_number ? `/${String(customer_number).trim()}` : "";
 
   let seq = null;
   try {
@@ -564,10 +568,10 @@ async function generateOurRef({ template_code, account_number }) {
   if (!seq) {
     const ts = dayjs().utc().format("YYYYMMDDHHmmss");
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-    return `${prefix}/${tmpl}/${yyyy}/${ts}-${rand}`; // e.g. KB/REC/DEMAND1/2025/20251107...-ABCD
+    return `${prefix}/${tmpl}/${yyyy}/${ts}-${rand}${custSuffix}`; // e.g. KB/REC/DEMAND1/2025/20251107...-ABCD
   }
 
-  return `${prefix}/${tmpl}/${yyyy}/${seq}`; // e.g. KB/REC/DEMAND1/2025/100321
+  return `${prefix}/${tmpl}/${yyyy}/${seq}${custSuffix}`; // e.g. KB/REC/DL1/2025/100321/301952171
 }
 
 
@@ -583,6 +587,15 @@ function ordinalDay(day) {
     case 3: return `${n}RD`;
     default: return `${n}TH`;
   }
+}
+
+// e.g. "MONDAY 3rd AUGUST 2026" — day name & month uppercase, ordinal suffix lowercase
+function formatFullDateMixedCase(value = null) {
+  const d = value ? dayjs(value) : dayjs();
+  if (!d.isValid()) return value;
+  const day = d.date();
+  const suffix = ordinalDay(day).replace(/\d+/, "").toLowerCase();
+  return `${d.format("dddd").toUpperCase()} ${day}${suffix} ${d.format("MMMM").toUpperCase()} ${d.format("YYYY")}`;
 }
 
 function formatRepossessionDate(value = null) {
@@ -616,6 +629,32 @@ function formatMoney(value) {
     }).format(parsed);
   }
   return text;
+}
+
+// Renders a money value with its sign dropped (e.g. "-1.28" -> "1.28")
+function formatAbsMoney(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const num = typeof value === "number" ? value : Number(String(value).trim().replace(/,/g, ""));
+  if (!Number.isFinite(num)) return value;
+  return formatMoney(Math.abs(num));
+}
+
+// DPD -> classification band, per bank policy
+const DPD_CLASSIFICATION_BANDS = [
+  { min: 0, max: 30, label: "Normal" },
+  { min: 31, max: 60, label: "Watch 1" },
+  { min: 61, max: 90, label: "Watch 2" },
+  { min: 91, max: 120, label: "Substandard 1" },
+  { min: 121, max: 180, label: "Substandard 2" },
+  { min: 181, max: 360, label: "Doubtful" },
+  { min: 361, max: Infinity, label: "Loss" },
+];
+
+function classifyByDaysPastDue(days) {
+  const n = Number(days);
+  if (!Number.isFinite(n) || n < 0) return "";
+  const band = DPD_CLASSIFICATION_BANDS.find((b) => n >= b.min && n <= b.max);
+  return band ? band.label : "";
 }
 
 function formatInterestRate(value) {
@@ -1039,8 +1078,27 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
     if (!data.our_ref) {
       data.our_ref = await generateOurRef({
         template_code,
-        account_number: data?.customer?.account_number
+        account_number: data?.customer?.account_number,
+        customer_number: data?.customer?.customer_number
       });
+    }
+
+    if (String(template_code).trim().toUpperCase() === "DL1") {
+      if (data.date) data.date = formatFullDateMixedCase(data.date);
+      if (data.as_of_date) data.as_of_date = formatFullDateMixedCase(data.as_of_date);
+
+      if (data.loan?.total_customer_balance !== undefined) {
+        data.loan.total_customer_balance = formatAbsMoney(data.loan.total_customer_balance);
+      }
+
+      if (Array.isArray(data.accounts)) {
+        data.accounts = data.accounts.map((acc) => ({
+          ...acc,
+          outstanding_balance: formatAbsMoney(acc.outstanding_balance),
+          arrears_amount: formatAbsMoney(acc.arrears_amount),
+          classification: classifyByDaysPastDue(acc.arrears_days) || acc.classification,
+        }));
+      }
     }
 
     // Resolve & render
