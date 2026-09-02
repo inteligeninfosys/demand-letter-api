@@ -552,9 +552,14 @@ async function generateOurRef({ template_code, account_number, customer_number }
   const tmpl = (template_code || "DEMAND").toUpperCase().replace(/[^\w/-]+/g, "");
   const yyyy = dayjs().utc().format("YYYY");
 
-  // For DL1/DL2, append the customer_number as the final ref segment.
+  // DL2's ref ends with just the customer_number, no sequence segment.
+  if (tmpl === "DL2" && customer_number) {
+    return `${prefix}/${tmpl}/${yyyy}/${String(customer_number).trim()}`; // e.g. KB/REC/DL2/2026/301948779
+  }
+
+  // For DL1, append the customer_number as the final ref segment (after the sequence).
   const custSuffix =
-    ["DL1", "DL2"].includes(tmpl) && customer_number ? `/${String(customer_number).trim()}` : "";
+    tmpl === "DL1" && customer_number ? `/${String(customer_number).trim()}` : "";
 
   let seq = null;
   try {
