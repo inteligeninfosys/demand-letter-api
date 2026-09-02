@@ -552,9 +552,9 @@ async function generateOurRef({ template_code, account_number, customer_number }
   const tmpl = (template_code || "DEMAND").toUpperCase().replace(/[^\w/-]+/g, "");
   const yyyy = dayjs().utc().format("YYYY");
 
-  // For DL1, append the customer_number as the final ref segment.
+  // For DL1/DL2, append the customer_number as the final ref segment.
   const custSuffix =
-    tmpl === "DL1" && customer_number ? `/${String(customer_number).trim()}` : "";
+    ["DL1", "DL2"].includes(tmpl) && customer_number ? `/${String(customer_number).trim()}` : "";
 
   let seq = null;
   try {
@@ -1098,6 +1098,15 @@ app.post("/demand-letters-api/letters", authenticate, async (req, res, next) => 
           arrears_amount: formatAbsMoney(acc.arrears_amount),
           classification: classifyByDaysPastDue(acc.arrears_days) || acc.classification,
         }));
+      }
+    }
+
+    if (String(template_code).trim().toUpperCase() === "DL2") {
+      if (data.loan?.outstanding_balance !== undefined) {
+        data.loan.outstanding_balance = formatAbsMoney(data.loan.outstanding_balance);
+      }
+      if (data.loan?.arrears_amount !== undefined) {
+        data.loan.arrears_amount = formatAbsMoney(data.loan.arrears_amount);
       }
     }
 
