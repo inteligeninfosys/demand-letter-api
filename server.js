@@ -552,14 +552,10 @@ async function generateOurRef({ template_code, account_number, customer_number }
   const tmpl = (template_code || "DEMAND").toUpperCase().replace(/[^\w/-]+/g, "");
   const yyyy = dayjs().utc().format("YYYY");
 
-  // DL2's ref ends with just the customer_number, no sequence segment.
-  if (tmpl === "DL2" && customer_number) {
-    return `${prefix}/${tmpl}/${yyyy}/${String(customer_number).trim()}`; // e.g. KB/REC/DL2/2026/301948779
+  // DL1/DL2 refs end with just the customer_number, no sequence segment.
+  if (["DL1", "DL2"].includes(tmpl) && customer_number) {
+    return `${prefix}/${tmpl}/${yyyy}/${String(customer_number).trim()}`; // e.g. KB/REC/DL1/2026/301952171
   }
-
-  // For DL1, append the customer_number as the final ref segment (after the sequence).
-  const custSuffix =
-    tmpl === "DL1" && customer_number ? `/${String(customer_number).trim()}` : "";
 
   let seq = null;
   try {
@@ -573,10 +569,10 @@ async function generateOurRef({ template_code, account_number, customer_number }
   if (!seq) {
     const ts = dayjs().utc().format("YYYYMMDDHHmmss");
     const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
-    return `${prefix}/${tmpl}/${yyyy}/${ts}-${rand}${custSuffix}`; // e.g. KB/REC/DEMAND1/2025/20251107...-ABCD
+    return `${prefix}/${tmpl}/${yyyy}/${ts}-${rand}`; // e.g. KB/REC/DEMAND1/2025/20251107...-ABCD
   }
 
-  return `${prefix}/${tmpl}/${yyyy}/${seq}${custSuffix}`; // e.g. KB/REC/DL1/2025/100321/301952171
+  return `${prefix}/${tmpl}/${yyyy}/${seq}`; // e.g. KB/REC/DEMAND1/2025/100321
 }
 
 
